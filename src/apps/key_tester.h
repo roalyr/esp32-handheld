@@ -1,18 +1,26 @@
-// [Revision: v1.0] [Path: src/apps/key_tester.h] [Date: 2025-12-09]
-// Description: Header for the Key Matrix Tester application.
+// [Revision: v2.0] [Path: src/apps/key_tester.h] [Date: 2025-12-10]
+// Description: Key Tester Application class definition.
 
 #ifndef APP_KEY_TESTER_H
 #define APP_KEY_TESTER_H
 
-#include "../hal.h"
+#include "../app_interface.h"
 
-// Initialize tester state (clear history)
-void setupTester();
+class KeyTesterApp : public App {
+  private:
+    char lastPressedKey;
+    static const int HISTORY_SIZE = 14;
+    char keyHistory[HISTORY_SIZE + 1];
 
-// Add a key to the scrolling history buffer
-void addToTesterHistory(char c);
+    void addToHistory(char c);
 
-// Render the debug interface showing history, last pressed key, and currently held keys
-void renderKeyTester(char lastKey, char* heldKeys, int count);
+  public:
+    KeyTesterApp(); // Constructor to init buffers
+    void start() override;
+    void stop() override;
+    void update() override;
+    void render() override;
+    void handleInput(char key) override;
+};
 
 #endif

@@ -1,14 +1,19 @@
-// [Revision: v1.0] [Path: src/apps/t9_editor.h] [Date: 2025-12-09]
-// Description: Header for the T9 Editor Application.
+// [Revision: v2.0] [Path: src/apps/t9_editor.h] [Date: 2025-12-10]
+// Description: T9 Editor Application class definition.
 
 #ifndef APP_T9_EDITOR_H
 #define APP_T9_EDITOR_H
 
-#include "../hal.h"
+#include "../app_interface.h"
 #include "../t9_engine.h"
 
-// Renders the T9 text editor interface, including the text buffer,
-// pending character candidate, timeout bar, and cursor.
-void renderT9Editor();
+class T9EditorApp : public App {
+  public:
+    void start() override;
+    void stop() override;
+    void update() override;
+    void render() override;
+    void handleInput(char key) override;
+};
 
 #endif

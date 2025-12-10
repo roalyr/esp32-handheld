@@ -1,21 +1,41 @@
-// [Revision: v1.0] [Path: src/apps/snake.h] [Date: 2025-12-09]
-// Description: Header for the Snake Game application.
+// [Revision: v2.0] [Path: src/apps/snake.h] [Date: 2025-12-10]
+// Description: Snake Game Application class definition.
 
 #ifndef APP_SNAKE_H
 #define APP_SNAKE_H
 
-#include "../hal.h"
+#include "../app_interface.h"
 
-// Initialize game state, reset score, spawn first food
-void setupSnake();
+struct Point { 
+    int x, y;
+};
 
-// Handle directional input (2/4/6/8) and restart (5)
-void handleSnakeInput(char key);
+class SnakeApp : public App {
+  private:
+    static const int MAX_SNAKE_LEN = 100;
+    static const int SNAKE_BLOCK_SIZE = 4;
+    static const int BOARD_W = 128 / SNAKE_BLOCK_SIZE;
+    static const int BOARD_H = 64 / SNAKE_BLOCK_SIZE;
 
-// Main game loop logic (movement, collision, eating)
-void updateSnake();
+    // Game State
+    Point snake[MAX_SNAKE_LEN];
+    int snakeLen;
+    int dirX, dirY;
+    Point food;
+    bool gameOver;
+    unsigned long lastMoveTime;
+    int gameSpeed;
 
-// Render game board and game over screen
-void renderSnake();
+    void spawnFood();
+    void resetGame();
+
+  public:
+    SnakeApp();
+    void start() override;
+    void stop() override;
+    void update() override;
+    void render() override;
+    void handleInput(char key) override;
+};
 
 #endif

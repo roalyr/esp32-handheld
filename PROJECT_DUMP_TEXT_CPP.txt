@@ -1,0 +1,757 @@
+--- Start of ./src/apps/gfx_test.cpp ---
+
+// [Revision: v1.0] [Path: src/apps/gfx_test.cpp] [Date: 2025-12-09]
+// Description: Implementation of the Graphics Test screen.
+// Notes: automatically cycles contrast 0-255 to test display biasing.
+
+#include "gfx_test.h"
+
+// --------------------------------------------------------------------------
+// LOCAL STATE
+// --------------------------------------------------------------------------
+
+// Keep these static so they persist between frames but don't pollute global namespace
+static int currentContrast = 0;
+static int contrastDir = 5;
+
+// --------------------------------------------------------------------------
+// RENDER LOGIC
+// --------------------------------------------------------------------------
+
+void renderGfxTest() {
+    // 1. Update Contrast Physics
+    currentContrast += contrastDir;
+    
+    // Bounce logic
+    if (currentContrast > 255) {
+        currentContrast = 255;
+        contrastDir = -5;
+    } else if (currentContrast < 0) {
+        currentContrast = 0;
+        contrastDir = 5;
+    }
+    
+    // Apply contrast immediately
+    u8g2.setContrast(currentContrast);
+
+    // 2. Text Elements
+    u8g2.setFont(FONT_SMALL);
+    u8g2.drawStr(0, 8, "CONTRAST CYCLE");
+
+    // 3. Checkerboard Pattern (Test pixel clarity)
+    // Optimization: Draw pixels in a strided loop
+    for(int y=10; y<50; y+=2) { 
+        for(int x=0; x<128; x+=2) {
+            if ((x+y)%4 == 0) u8g2.drawPixel(x, y);
+        }
+    }
+    
+    // 4. Geometry Tests
+    u8g2.drawFrame(10, 20, 108, 20); // Outer box
+    u8g2.drawBox(12, 22, 20, 16);    // Filled box
+    u8g2.drawFrame(34, 22, 20, 16);  // Empty box
+    
+    // Vertical lines test
+    for(int i=56; i<76; i+=2) u8g2.drawVLine(i, 22, 16); 
+    
+    // 5. Status Display
+    char stateBuf[32];
+    sprintf(stateBuf, "CONTRAST: %d", currentContrast);
+    u8g2.drawStr(0, 56, stateBuf);
+    
+    // Navigation Hint
+    u8g2.drawStr(0, 64, "PRESS X/Y TO EXIT");
+}
+
+--- Start of ./src/apps/key_tester.cpp ---
+
+// [Revision: v1.0] [Path: src/apps/key_tester.cpp] [Date: 2025-12-09]
+// Description: Implementation of the Key Matrix Tester application.
+
+#include "key_tester.h"
+
+// --------------------------------------------------------------------------
+// LOCAL STATE
+// --------------------------------------------------------------------------
+
+const int HISTORY_SIZE = 14;
+char keyHistory[HISTORY_SIZE + 1];
+
+// --------------------------------------------------------------------------
+// LOGIC
+// --------------------------------------------------------------------------
+
+void setupTester() {
+  // Clear history buffer with spaces
+  for(int i=0; i<HISTORY_SIZE; i++) keyHistory[i] = ' ';
+  keyHistory[HISTORY_SIZE] = '\0';
+}
+
+void addToTesterHistory(char c) {
+    // Shift history left
+    for(int i=0; i < HISTORY_SIZE-1; i++) keyHistory[i] = keyHistory[i+1];
+    // Add new character at the end
+    keyHistory[HISTORY_SIZE-1] = c;
+}
+
+// --------------------------------------------------------------------------
+// RENDER
+// --------------------------------------------------------------------------
+
+void renderKeyTester(char lastKey, char* heldKeys, int count) {
+    // 1. Draw Header Frame
+    u8g2.drawFrame(0, 0, 128, 15);
+    u8g2.setFont(FONT_SMALL);
+    
+    // 2. Draw History (inside the frame)
+    u8g2.drawUTF8(2, 10, keyHistory);
+
+    // 3. Last Key Display (Large Font)
+    u8g2.drawUTF8(0, 28, "LAST PRESSED:");
+    if (lastKey != ' ') {
+        u8g2.setFont(u8g2_font_inr24_t_cyrillic);
+        char keyStr[2] = {lastKey, '\0'}; 
+        u8g2.drawUTF8(50, 58, keyStr);
+    }
+    
+    // 4. Currently Held Keys List
+    u8g2.setFont(FONT_SMALL);
+    u8g2.drawUTF8(0, 63, "HELD:");
+    int xPos = 25;
+    
+    for(int i=0; i<count; i++) {
+       char buf[4];
+       buf[0] = '[';
+       buf[1] = heldKeys[i];
+       buf[2] = ']';
+       buf[3] = '\0';
+       u8g2.drawStr(xPos, 63, buf);
+       xPos += 15;
+    }
+}
+
+--- Start of ./src/apps/snake.cpp ---
+
+// [Revision: v1.1] [Path: src/apps/snake.cpp] [Date: 2025-12-09]
+// Description: Implementation of Snake Game logic.
+// Changes: Added randomSeed initialization for true randomness.
+
+#include "snake.h"
+
+// --------------------------------------------------------------------------
+// CONFIGURATION
+// --------------------------------------------------------------------------
+
+#define SNAKE_BLOCK_SIZE 4
+#define BOARD_W (128 / SNAKE_BLOCK_SIZE)
+#define BOARD_H (64 / SNAKE_BLOCK_SIZE)
+#define MAX_SNAKE_LEN 100
+
+struct Point { 
+    int x, y;
+};
+
+// --------------------------------------------------------------------------
+// STATE
+// --------------------------------------------------------------------------
+
+Point snake[MAX_SNAKE_LEN];
+int snakeLen = 3;
+int dirX = 1; 
+int dirY = 0;
+Point food;
+
+bool gameOver = false;
+unsigned long lastMoveTime = 0;
+int gameSpeed = 150; // ms per frame
+
+// --------------------------------------------------------------------------
+// LOGIC
+// --------------------------------------------------------------------------
+
+void spawnFood() {
+  // Random coordinates within board limits (1px buffer from edge)
+  food.x = random(1, BOARD_W - 1);
+  food.y = random(1, BOARD_H - 1);
+}
+
+void setupSnake() {
+  // Initialize Random Generator (Fixes static food pattern)
+  randomSeed(esp_random());
+
+  snakeLen = 3;
+  // Start position
+  snake[0] = {10, 10};
+  snake[1] = {9, 10};
+  snake[2] = {8, 10};
+  
+  // Default direction: Right
+  dirX = 1; 
+  dirY = 0;
+  
+  gameOver = false;
+  spawnFood();
+}
+
+void handleSnakeInput(char key) {
+  if (gameOver) {
+    if (key == '5') setupSnake();
+    return;
+  }
+  
+  // Directional Input (prevent 180 degree turns)
+  // '2' = UP
+  if (key == '2' && dirY == 0) { dirX = 0; dirY = -1; }
+  // '8' = DOWN
+  if (key == '8' && dirY == 0) { dirX = 0; dirY = 1; }
+  // '4' = LEFT
+  if (key == '4' && dirX == 0) { dirX = -1; dirY = 0; }
+  // '6' = RIGHT
+  if (key == '6' && dirX == 0) { dirX = 1; dirY = 0; }
+}
+
+void updateSnake() {
+  if (gameOver) return;
+  if (millis() - lastMoveTime < gameSpeed) return;
+  
+  lastMoveTime = millis();
+
+  // Move body segments
+  for (int i = snakeLen - 1; i > 0; i--) {
+    snake[i] = snake[i - 1];
+  }
+  
+  // Move head
+  snake[0].x += dirX;
+  snake[0].y += dirY;
+
+  // 1. Wall Collision
+  if (snake[0].x < 0 || snake[0].x >= BOARD_W || snake[0].y < 0 || snake[0].y >= BOARD_H) {
+    gameOver = true;
+  }
+
+  // 2. Self Collision
+  for (int i = 1; i < snakeLen; i++) {
+    if (snake[0].x == snake[i].x && snake[0].y == snake[i].y) {
+        gameOver = true;
+    }
+  }
+
+  // 3. Eat Food
+  if (snake[0].x == food.x && snake[0].y == food.y) {
+    if (snakeLen < MAX_SNAKE_LEN) snakeLen++;
+    spawnFood();
+  }
+}
+
+// --------------------------------------------------------------------------
+// RENDER
+// --------------------------------------------------------------------------
+
+void renderSnake() {
+  if (gameOver) {
+    u8g2.setFont(u8g2_font_ncenB14_tr);
+    u8g2.drawStr(15, 30, "GAME OVER");
+    u8g2.setFont(FONT_SMALL);
+    u8g2.drawStr(25, 50, "PRESS 5 TO RESTART");
+    
+    // Draw Score
+    u8g2.setDrawColor(1);
+    char score[15];
+    sprintf(score, "Score: %d", snakeLen - 3);
+    u8g2.drawStr(40, 60, score);
+    return;
+  }
+
+  // Draw Food
+  u8g2.drawBox(food.x * SNAKE_BLOCK_SIZE, food.y * SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE - 1, SNAKE_BLOCK_SIZE - 1);
+  
+  // Draw Snake
+  for (int i = 0; i < snakeLen; i++) {
+    if (i == 0) {
+        // Head is a Frame (Hollow)
+        u8g2.drawFrame(snake[i].x * SNAKE_BLOCK_SIZE, snake[i].y * SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE);
+    } else {
+        // Body is a Box (Filled)
+        u8g2.drawBox(snake[i].x * SNAKE_BLOCK_SIZE, snake[i].y * SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE - 1, SNAKE_BLOCK_SIZE - 1);
+    }
+  }
+}
+
+--- Start of ./src/apps/t9_editor.cpp ---
+
+// [Revision: v1.0] [Path: src/apps/t9_editor.cpp] [Date: 2025-12-09]
+// Description: Rendering logic for the T9 Editor application.
+
+#include "t9_editor.h"
+
+void renderT9Editor() {
+  // 1. Draw Header
+  u8g2.drawHLine(0, 10, 128);
+  u8g2.setFont(FONT_SMALL); 
+  u8g2.drawUTF8(2, 8, "T9 EDITOR v1.5");
+  
+  // 2. Setup Text Position
+  u8g2.setFont(u8g2_font_6x13_t_cyrillic); // Larger font for main text
+  int x = 2; 
+  int y = 25;
+  
+  // 3. Draw Committed Text
+  u8g2.drawUTF8(x, y, engine.textBuffer.c_str());
+  
+  // 4. Draw Pending Character (Candidate)
+  if (engine.pendingCommit) {
+    String pChar = engine.getCurrentChar();
+    
+    // Calculate position after existing text
+    int width = u8g2.getUTF8Width(engine.textBuffer.c_str());
+    
+    // Draw the candidate character
+    u8g2.drawUTF8(x + width, y, pChar.c_str());
+    
+    // Draw Underline for candidate
+    u8g2.drawHLine(x + width, y+2, u8g2.getUTF8Width(pChar.c_str()));
+    
+    // Draw Timeout Progress Bar
+    long timeLeft = MULTITAP_TIMEOUT - (millis() - engine.getLastPressTime());
+    int barWidth = map(timeLeft, 0, MULTITAP_TIMEOUT, 0, 10);
+    // Clamp bar width to avoid visual artifacts if time slightly negative
+    if (barWidth < 0) barWidth = 0; 
+    u8g2.drawHLine(x + width, y+4, barWidth);
+  }
+  
+  // 5. Draw Blinking Cursor (only when not typing a character)
+  if (!engine.pendingCommit && (millis() / CURSOR_BLINK_RATE) % 2) {
+    int width = u8g2.getUTF8Width(engine.textBuffer.c_str());
+    u8g2.drawVLine(x + width + 1, y - 10, 12);
+  }
+}
+
+--- Start of ./src/hal.cpp ---
+
+// [Revision: v1.0] [Path: src/hal.cpp] [Date: 2025-12-09]
+// Description: Implementation of hardware initialization, display setup, and matrix scanning logic.
+
+#include "hal.h"
+
+// --------------------------------------------------------------------------
+// DISPLAY OBJECTS
+// --------------------------------------------------------------------------
+
+// Initialize ST7565 Display with Hardware SPI
+// Pins: Clock=SCK, Data=MOSI (Hardware default), CS, DC, RST
+U8G2_ST7565_ERC12864_F_4W_HW_SPI u8g2(U8G2_R0, PIN_CS, PIN_DC, PIN_RST);
+
+// Define the shared font here to ensure single storage in Flash
+const uint8_t* FONT_SMALL = u8g2_font_5x7_t_cyrillic;
+
+// --------------------------------------------------------------------------
+// INPUT MATRIX CONFIG
+// --------------------------------------------------------------------------
+
+// Pin Definitions
+byte rowPins[ROWS] = {42, 41, 40, 39};
+byte colPins[COLS] = {1, 2, 6, 7, 15}; 
+
+// Key Character Map
+char keyMap[ROWS][COLS] = {
+  {'*','0','#','D', 'M'}, 
+  {'7','8','9','C', 'Z'}, 
+  {'4','5','6','B', 'Y'}, 
+  {'1','2','3','A', 'X'}  
+};
+
+// Scanning State
+char activeKeys[MAX_PRESSED_KEYS];
+int activeKeyCount = 0;
+
+// Previous frame state for edge detection
+char prevActiveKeys[MAX_PRESSED_KEYS];
+int prevKeyCount = 0;
+
+// --------------------------------------------------------------------------
+// HARDWARE SETUP
+// --------------------------------------------------------------------------
+
+void setupHardware() {
+  // Initialize Row Pins (Inputs with Pullup)
+  for(int i=0; i<ROWS; i++) {
+      pinMode(rowPins[i], INPUT_PULLUP);
+  }
+
+  // Initialize Col Pins (Inputs - High Z state initially)
+  for(int i=0; i<COLS; i++) {
+      pinMode(colPins[i], INPUT);
+  }
+
+  // Initialize Display
+  u8g2.begin();
+  u8g2.setContrast(0); // Start with neutral contrast
+  u8g2.setFontMode(1); // Transparent font background
+  u8g2.setBitmapMode(1);
+  u8g2.enableUTF8Print(); // Enable Cyrillic support
+}
+
+// --------------------------------------------------------------------------
+// MATRIX SCANNING LOGIC
+// --------------------------------------------------------------------------
+
+void scanMatrix() {
+  // 1. Archive current state to previous state
+  prevKeyCount = activeKeyCount;
+  memcpy(prevActiveKeys, activeKeys, sizeof(activeKeys));
+  
+  // 2. Reset current counter
+  activeKeyCount = 0;
+
+  // 3. Scan Columns
+  for (int c = 0; c < COLS; c++) {
+    // Drive current column LOW
+    pinMode(colPins[c], OUTPUT);
+    digitalWrite(colPins[c], LOW); 
+    
+    // Short delay for signal settling
+    delayMicroseconds(50);
+
+    // Check Rows
+    for (int r = 0; r < ROWS; r++) {
+      // If Row is LOW, the switch is closed
+      if (digitalRead(rowPins[r]) == LOW) {
+        if (activeKeyCount < MAX_PRESSED_KEYS) {
+           activeKeys[activeKeyCount++] = keyMap[r][c];
+        }
+      }
+    }
+    
+    // Return column to High-Z (Input)
+    pinMode(colPins[c], INPUT);
+  }
+}
+
+// --------------------------------------------------------------------------
+// INPUT UTILITIES
+// --------------------------------------------------------------------------
+
+// Returns true only on the specific frame a key is first pressed
+bool isJustPressed(char key) {
+  // 1. Verify key is currently held
+  bool currentlyPressed = false;
+  for(int i=0; i<activeKeyCount; i++) {
+    if(activeKeys[i] == key) { 
+        currentlyPressed = true;
+        break; 
+    }
+  }
+  
+  if (!currentlyPressed) return false;
+
+  // 2. Verify key was NOT held in previous frame
+  for(int i=0; i<prevKeyCount; i++) {
+    if(prevActiveKeys[i] == key) return false; 
+  }
+  
+  return true;
+}
+
+--- Start of ./src/main.cpp ---
+
+// [Revision: v1.0] [Path: src/main.cpp] [Date: 2025-12-09]
+// Description: Main entry point. Manages the main run loop, system mode switching, and event dispatching.
+
+#include <Arduino.h>
+#include "config.h"
+#include "hal.h"
+#include "t9_engine.h"
+
+// App Modules
+#include "apps/t9_editor.h"
+#include "apps/key_tester.h"
+#include "apps/snake.h"
+#include "apps/gfx_test.h"
+
+// --------------------------------------------------------------------------
+// SYSTEM STATE
+// --------------------------------------------------------------------------
+
+SystemMode currentMode = MODE_T9_EDITOR;
+
+// Store the last pressed key for the Key Tester app
+char lastTestKey = ' ';
+
+// --------------------------------------------------------------------------
+// MAIN SETUP
+// --------------------------------------------------------------------------
+
+void setup() {
+  Serial.begin(115200);
+  
+  // 1. Initialize Hardware (Display & Matrix)
+  setupHardware();
+  
+  // 2. Initialize Apps
+  setupTester();
+  setupSnake(); 
+  
+  // 3. Initial State
+  u8g2.setContrast(0);
+}
+
+// --------------------------------------------------------------------------
+// MAIN LOOP
+// --------------------------------------------------------------------------
+
+void loop() {
+  // 1. HARDWARE SCAN
+  // Must be called once per frame to update key states
+  scanMatrix();
+
+  // 2. EVENT HANDLING
+  for(int i=0; i<activeKeyCount; i++) {
+    char key = activeKeys[i];
+    
+    // Only trigger actions on the *first* frame of a press
+    if (isJustPressed(key)) {
+        
+        // --- GLOBAL APP SWITCHING ---
+        // X = T9 Editor
+        // Y = Key Tester
+        // A = Snake
+        // B = GFX Test
+        
+        if (key == 'X') {
+          currentMode = MODE_T9_EDITOR;
+          u8g2.setContrast(0); // Reset contrast in case we came from GFX Test
+          continue;
+        }
+        if (key == 'Y') {
+          currentMode = MODE_KEY_TESTER;
+          u8g2.setContrast(0);
+          continue; 
+        }
+        if (key == 'A') {
+          currentMode = MODE_SNAKE;
+          setupSnake(); // Reset game on entry
+          u8g2.setContrast(0);
+          continue;
+        }
+        if (key == 'B') {
+          currentMode = MODE_GFX_TEST;
+          // Note: GFX Test handles its own contrast
+          continue;
+        }
+        
+        // --- APP INPUT DELEGATION ---
+        switch (currentMode) {
+            case MODE_T9_EDITOR:
+                engine.handleInput(key);
+                break;
+            case MODE_KEY_TESTER:
+                lastTestKey = key;
+                addToTesterHistory(key);
+                break;
+            case MODE_SNAKE:
+                handleSnakeInput(key);
+                break;
+            case MODE_GFX_TEST:
+                // GFX Test is passive / auto-running
+                break;
+        }
+    }
+  }
+
+  // 3. LOGIC UPDATE
+  // Handle continuous updates (timers, physics, etc.)
+  if (currentMode == MODE_T9_EDITOR) engine.update();
+  if (currentMode == MODE_SNAKE) updateSnake();
+
+  // 4. RENDER
+  u8g2.clearBuffer();
+  
+  switch (currentMode) {
+      case MODE_T9_EDITOR:
+          renderT9Editor();
+          break;
+      case MODE_KEY_TESTER:
+          renderKeyTester(lastTestKey, activeKeys, activeKeyCount);
+          break;
+      case MODE_SNAKE:
+          renderSnake();
+          break;
+      case MODE_GFX_TEST:
+          renderGfxTest();
+          break;
+  }
+  
+  u8g2.sendBuffer();
+}
+
+--- Start of ./src/t9_engine.cpp ---
+
+// [Revision: v1.0] [Path: src/t9_engine.cpp] [Date: 2025-12-09]
+// Description: Implementation of T9 multi-tap logic with UTF-8 support.
+
+#include "t9_engine.h"
+
+// --------------------------------------------------------------------------
+// CHARACTER MAPS
+// --------------------------------------------------------------------------
+
+// Multi-tap mappings including Cyrillic characters
+const char* t9Map[] = {
+  " 0",                  // 0
+  ".,?!1",               // 1
+  "abc2абвгґ",           // 2
+  "def3деєжз",           // 3
+  "ghi4иіїйкл",          // 4
+  "jkl5мноп",            // 5
+  "mno6рсту",            // 6
+  "pqrs7фхцч",           // 7
+  "tuv8шщ",              // 8
+  "wxyz9ьюя"             // 9
+};
+
+T9Engine engine;
+
+// --------------------------------------------------------------------------
+// UTF-8 HELPER METHODS
+// --------------------------------------------------------------------------
+
+// Calculate actual character count (not byte count) for UTF-8 string
+int T9Engine::getUtf8Length(const char* str) {
+  int len = 0;
+  int i = 0;
+  while(str[i] != 0) {
+    // 0xC0 mask checks for start of multibyte sequence
+    if ((str[i] & 0xC0) != 0x80) len++;
+    i++;
+  }
+  return len;
+}
+
+// Extract specific character at visual index from UTF-8 string
+String T9Engine::getUtf8CharAtIndex(const char* str, int index) {
+  int count = 0;
+  int i = 0;
+  int start = 0;
+  
+  while(str[i] != 0) {
+    if ((str[i] & 0xC0) != 0x80) { 
+        if (count == index) start = i;
+        if (count == index + 1) {
+            String res = "";
+            for(int k=start; k<i; k++) res += str[k];
+            return res;
+        }
+        count++;
+    }
+    i++;
+  }
+  // Handle last character case
+  if (count == index + 1) {
+      String res = "";
+      for(int k=start; k<i; k++) res += str[k];
+      return res;
+  }
+  return "";
+}
+
+// --------------------------------------------------------------------------
+// ENGINE LOGIC
+// --------------------------------------------------------------------------
+
+unsigned long T9Engine::getLastPressTime() { return lastPressTime; }
+
+String T9Engine::getCurrentChar() {
+  if (!pendingCommit) return "";
+  int mapIndex = pendingKey - '0';
+  if (mapIndex < 0 || mapIndex > 9) return String(pendingKey); 
+  
+  String c = getUtf8CharAtIndex(t9Map[mapIndex], cycleIndex);
+  
+  if (isShifted) {
+      // Basic ASCII upper-casing
+      if (c.length() == 1 && c[0] >= 'a' && c[0] <= 'z') {
+        c = String((char)(c[0] - 32));
+      }
+      // Note: Cyrillic uppercase implementation omitted for brevity
+  }
+  return c;
+}
+
+void T9Engine::handleInput(char key) {
+  unsigned long now = millis();
+
+  // BACKSPACE (M)
+  if (key == 'M') { 
+    if (pendingCommit) {
+        pendingCommit = false;
+    } else if (textBuffer.length() > 0) {
+        // Remove last UTF-8 character
+        while(textBuffer.length() > 0) {
+          char lastByte = textBuffer[textBuffer.length()-1];
+          textBuffer.remove(textBuffer.length() - 1);
+          if ((lastByte & 0xC0) != 0x80) break; 
+        }
+    }
+    return;
+  }
+  
+  // NEWLINE (Z)
+  if (key == 'Z') {
+    if (pendingCommit) commit();
+    textBuffer += '\n';
+    return;
+  }
+  
+  // SPACE (#)
+  if (key == '#') {
+      if (pendingCommit) commit();
+      textBuffer += ' ';
+      return;
+  }
+  
+  // SHIFT (*)
+  if (key == '*') { 
+    isShifted = !isShifted;
+    return;
+  }
+
+  // NUMERIC KEYS (0-9)
+  if (key >= '0' && key <= '9') {
+    // If same key pressed within timeout -> cycle character
+    if (pendingCommit && key == pendingKey && (now - lastPressTime < MULTITAP_TIMEOUT)) {
+      cycleIndex++;
+      int mapLen = getUtf8Length(t9Map[key - '0']);
+      if (cycleIndex >= mapLen) cycleIndex = 0; 
+      lastPressTime = now;
+    } else {
+      // New key pressed -> commit previous and start new cycle
+      if (pendingCommit) commit();
+      pendingKey = key;
+      cycleIndex = 0;
+      pendingCommit = true;
+      lastPressTime = now;
+    }
+  } else {
+      // Any other key commits current character
+      if (pendingCommit) commit();
+  }
+}
+
+void T9Engine::update() {
+  // Auto-commit if timeout reached
+  if (pendingCommit && (millis() - lastPressTime > MULTITAP_TIMEOUT)) {
+    commit();
+  }
+}
+
+void T9Engine::commit() {
+  textBuffer += getCurrentChar();
+  pendingCommit = false;
+  cycleIndex = 0;
+}
+
+void T9Engine::reset() {
+    textBuffer = "";
+    pendingCommit = false;
+}

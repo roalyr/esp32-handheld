@@ -1,5 +1,5 @@
-// [Revision: v2.3] [Path: src/main.cpp] [Date: 2025-12-10]
-// Description: Main loop now enforces PHYSICAL_FPS (60Hz).
+// [Revision: v2.4] [Path: src/main.cpp] [Date: 2025-12-10]
+// Description: Added Stopwatch App to system.
 
 #include <Arduino.h>
 #include "config.h"
@@ -11,7 +11,8 @@
 #include "apps/snake.h"
 #include "apps/gfx_test.h"
 #include "apps/menu.h"
-#include "apps/asteroids.h" 
+#include "apps/asteroids.h"
+#include "apps/stopwatch.h" // New
 
 // --------------------------------------------------------------------------
 // SYSTEM STATE
@@ -22,7 +23,8 @@ KeyTesterApp appKeyTester;
 SnakeApp appSnake;
 GfxTestApp appGfxTest;
 MenuApp appMenu;
-AsteroidsApp appAsteroids; 
+AsteroidsApp appAsteroids;
+StopwatchApp appStopwatch; // New
 
 App* currentApp = nullptr;
 
@@ -56,7 +58,6 @@ void loop() {
         char key = activeKeys[i];
         
         if (isJustPressed(key)) {
-            // Global Home Key
             if (key == 'D') {
                 if (currentApp != &appMenu) switchApp(&appMenu);
                 continue;
@@ -79,6 +80,7 @@ void loop() {
                       case 2: switchApp(&appSnake); break;
                       case 3: switchApp(&appGfxTest); break;
                       case 4: switchApp(&appAsteroids); break; 
+                      case 5: switchApp(&appStopwatch); break; // New
                   }
               }
           }

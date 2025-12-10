@@ -1,7 +1,10 @@
-// [Revision: v2.0] [Path: src/hal.cpp] [Date: 2025-12-10]
-// Description: Added systemContrast definition and initialization.
+// [Revision: v2.1] [Path: src/hal.cpp] [Date: 2025-12-10]
+// Description: Added SPIFFS and SD card initialization for dual storage support.
 
 #include "hal.h"
+#include <FS.h>
+#include <SPIFFS.h>
+#include <SD.h>
 
 // --------------------------------------------------------------------------
 // DISPLAY OBJECTS
@@ -45,6 +48,21 @@ void setupHardware() {
   u8g2.setFontMode(1);
   u8g2.setBitmapMode(1);
   u8g2.enableUTF8Print();
+  
+  // Initialize SPIFFS (built-in 16MB flash storage)
+  if (!SPIFFS.begin(true)) {
+    Serial.println("SPIFFS mount failed");
+  } else {
+    Serial.println("SPIFFS mounted successfully");
+  }
+  
+  // Initialize SD card (SPI mode, will be added later)
+  // For now, attempt initialization but don't fail if unavailable
+  if (!SD.begin(-1, SPI, 4000000)) {
+    Serial.println("SD card not available (will be added later)");
+  } else {
+    Serial.println("SD card mounted successfully");
+  }
 }
 
 // --------------------------------------------------------------------------

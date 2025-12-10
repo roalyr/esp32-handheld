@@ -1,5 +1,5 @@
-// [Revision: v2.6] [Path: src/main.cpp] [Date: 2025-12-10]
-// Description: Added handling for app exit requests (fixes T9 Editor exit bug).
+// [Revision: v2.7] [Path: src/main.cpp] [Date: 2025-12-10]
+// Description: Added File Browser app instantiation and routing.
 
 #include <Arduino.h>
 #include "config.h"
@@ -13,6 +13,7 @@
 #include "apps/menu.h"
 #include "apps/asteroids.h"
 #include "apps/stopwatch.h"
+#include "apps/file_browser.h"
 
 // --------------------------------------------------------------------------
 // SYSTEM STATE
@@ -25,6 +26,7 @@ GfxTestApp appGfxTest;
 MenuApp appMenu;
 AsteroidsApp appAsteroids;
 StopwatchApp appStopwatch;
+FileBrowserApp appFileBrowser;
 
 App* currentApp = nullptr;
 
@@ -98,6 +100,7 @@ void loop() {
                       case 3: switchApp(&appGfxTest); break;
                       case 4: switchApp(&appAsteroids); break; 
                       case 5: switchApp(&appStopwatch); break;
+                      case 6: switchApp(&appFileBrowser); break;
                   }
               }
           }

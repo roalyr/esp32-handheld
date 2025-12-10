@@ -1,5 +1,5 @@
-// [Revision: v2.2] [Path: src/apps/menu.cpp] [Date: 2025-12-10]
-// Description: Menu with Scrolling Viewport.
+// [Revision: v2.3] [Path: src/apps/menu.cpp] [Date: 2025-12-10]
+// Description: Added File Browser menu item to app list.
 // Visuals: Shows 4 items at a time.
 
 #include "menu.h"

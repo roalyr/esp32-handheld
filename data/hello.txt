@@ -1,0 +1,4 @@
+// [Revision: v1.0] [Path: data/hello.txt] [Date: 2025-12-10]
+// Description: Sample file uploaded to SPIFFS for verification
+
+Hello SPIFFS

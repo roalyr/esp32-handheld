@@ -1,5 +1,5 @@
-// [Revision: v2.1] [Path: src/config.h] [Date: 2025-12-10]
-// Description: Global hardware definitions. Added DEFAULT_CONTRAST.
+// [Revision: v2.2] [Path: src/config.h] [Date: 2025-12-10]
+// Description: Added PHYSICAL_FPS and FRAME_DELAY_MS for game loop timing.
 
 #ifndef CONFIG_H
 #define CONFIG_H
@@ -25,8 +25,11 @@ extern char keyMap[ROWS][COLS];
 // TIMING & CONFIG CONSTANTS
 // --------------------------------------------------------------------------
 
+#define PHYSICAL_FPS 10
+#define FRAME_DELAY_MS (1000 / PHYSICAL_FPS)
+
 #define MULTITAP_TIMEOUT 800   
 #define CURSOR_BLINK_RATE 500
-#define DEFAULT_CONTRAST 10     // Global default contrast (0-255)
+#define DEFAULT_CONTRAST 0     
 
 #endif

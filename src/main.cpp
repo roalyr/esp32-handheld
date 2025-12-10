@@ -1,5 +1,5 @@
-// [Revision: v2.1] [Path: src/main.cpp] [Date: 2025-12-10]
-// Description: Updated Main to include MenuApp and handle app switching logic.
+// [Revision: v2.3] [Path: src/main.cpp] [Date: 2025-12-10]
+// Description: Main loop now enforces PHYSICAL_FPS (60Hz).
 
 #include <Arduino.h>
 #include "config.h"
@@ -10,98 +10,83 @@
 #include "apps/key_tester.h"
 #include "apps/snake.h"
 #include "apps/gfx_test.h"
-#include "apps/menu.h"  // <--- NEW
+#include "apps/menu.h"
+#include "apps/asteroids.h" 
 
 // --------------------------------------------------------------------------
 // SYSTEM STATE
 // --------------------------------------------------------------------------
 
-// App Instances
 T9EditorApp appT9Editor;
 KeyTesterApp appKeyTester;
 SnakeApp appSnake;
 GfxTestApp appGfxTest;
-MenuApp appMenu;        // <--- NEW
+MenuApp appMenu;
+AsteroidsApp appAsteroids; 
 
-// Current Active App
 App* currentApp = nullptr;
 
-// --------------------------------------------------------------------------
-// HELPER FUNCTIONS
-// --------------------------------------------------------------------------
+// Timing Control
+unsigned long lastFrameTime = 0;
 
 void switchApp(App* newApp) {
-  if (currentApp) {
-    currentApp->stop();
-  }
+  if (currentApp) currentApp->stop();
   currentApp = newApp;
-  if (currentApp) {
-    currentApp->start();
-  }
+  if (currentApp) currentApp->start();
 }
-
-// --------------------------------------------------------------------------
-// MAIN SETUP
-// --------------------------------------------------------------------------
 
 void setup() {
   Serial.begin(115200);
   setupHardware();
-  
-  // Start with Menu
   switchApp(&appMenu);
 }
 
-// --------------------------------------------------------------------------
-// MAIN LOOP
-// --------------------------------------------------------------------------
-
 void loop() {
-  // 1. HARDWARE SCAN
-  scanMatrix();
+  unsigned long now = millis();
+  
+  // Enforce 60 FPS
+  if (now - lastFrameTime >= FRAME_DELAY_MS) {
+      lastFrameTime = now;
 
-  // 2. EVENT HANDLING
-  for(int i=0; i<activeKeyCount; i++) {
-    char key = activeKeys[i];
+      // 1. HARDWARE SCAN
+      scanMatrix();
     
-    if (isJustPressed(key)) {
+      // 2. EVENT HANDLING
+      for(int i=0; i<activeKeyCount; i++) {
+        char key = activeKeys[i];
         
-        // --- EMERGENCY GLOBAL HOME KEY ---
-        // 'D' acts as a "Back to Menu" button global override
-        if (key == 'D') {
-            if (currentApp != &appMenu) switchApp(&appMenu);
-            continue;
+        if (isJustPressed(key)) {
+            // Global Home Key
+            if (key == 'D') {
+                if (currentApp != &appMenu) switchApp(&appMenu);
+                continue;
+            }
+            if (currentApp) currentApp->handleInput(key);
         }
-        
-        // --- APP INPUT DELEGATION ---
-        if (currentApp) {
-            currentApp->handleInput(key);
-        }
-    }
-  }
-
-  // 3. LOGIC UPDATE
-  if (currentApp) {
-      currentApp->update();
-      
-      // Check if the current app is the Menu, and if it requested a switch
-      if (currentApp == &appMenu) {
-          int req = appMenu.getPendingSwitch();
-          if (req != -1) {
-              switch(req) {
-                  case 0: switchApp(&appT9Editor); break;
-                  case 1: switchApp(&appKeyTester); break;
-                  case 2: switchApp(&appSnake); break;
-                  case 3: switchApp(&appGfxTest); break;
+      }
+    
+      // 3. LOGIC UPDATE
+      if (currentApp) {
+          currentApp->update();
+          
+          // Menu Switching Logic
+          if (currentApp == &appMenu) {
+              int req = appMenu.getPendingSwitch();
+              if (req != -1) {
+                  switch(req) {
+                      case 0: switchApp(&appT9Editor); break;
+                      case 1: switchApp(&appKeyTester); break;
+                      case 2: switchApp(&appSnake); break;
+                      case 3: switchApp(&appGfxTest); break;
+                      case 4: switchApp(&appAsteroids); break; 
+                  }
               }
           }
       }
+    
+      // 4. RENDER
+      u8g2.clearBuffer();
+      if (currentApp) currentApp->render();
+      u8g2.sendBuffer();
   }
-
-  // 4. RENDER
-  u8g2.clearBuffer();
-  if (currentApp) {
-      currentApp->render();
-  }
-  u8g2.sendBuffer();
 }

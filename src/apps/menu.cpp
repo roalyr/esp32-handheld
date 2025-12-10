@@ -1,5 +1,5 @@
-// [Revision: v1.0] [Path: src/apps/menu.cpp] [Date: 2025-12-10]
-// Description: Logic for the Main Menu (Navigation and Selection).
+// [Revision: v2.0] [Path: src/apps/menu.cpp] [Date: 2025-12-10]
+// Description: Menu logic. No changes to logic, just recompiling with new ITEM_COUNT from header.
 
 #include "menu.h"
 
@@ -10,38 +10,28 @@ MenuApp::MenuApp() {
 
 void MenuApp::start() {
     u8g2.setContrast(systemContrast);
-    // Do not reset selectedIndex here so we remember cursor position
     pendingSwitchIndex = -1;
 }
 
-void MenuApp::stop() {
-    // No cleanup needed
-}
+void MenuApp::stop() {}
 
-void MenuApp::update() {
-    // No continuous animation needed
-}
+void MenuApp::update() {}
 
 int MenuApp::getPendingSwitch() {
     int temp = pendingSwitchIndex;
-    pendingSwitchIndex = -1; // Reset after reading
+    pendingSwitchIndex = -1; 
     return temp;
 }
 
 void MenuApp::handleInput(char key) {
-    // UP (2)
     if (key == '2') {
         selectedIndex--;
-        if (selectedIndex < 0) selectedIndex = ITEM_COUNT - 1; // Wrap around
+        if (selectedIndex < 0) selectedIndex = ITEM_COUNT - 1;
     }
-    
-    // DOWN (8)
     if (key == '8') {
         selectedIndex++;
-        if (selectedIndex >= ITEM_COUNT) selectedIndex = 0; // Wrap around
+        if (selectedIndex >= ITEM_COUNT) selectedIndex = 0;
     }
-
-    // ENTER (5) or OK (A/B/C/D context dependent, using 5 for now)
     if (key == '5') {
         pendingSwitchIndex = selectedIndex;
     }
@@ -49,32 +39,24 @@ void MenuApp::handleInput(char key) {
 
 void MenuApp::render() {
     u8g2.setFont(FONT_SMALL);
-    
-    // Draw Header
     u8g2.drawBox(0, 0, 128, 10);
-    u8g2.setDrawColor(0); // Invert text
+    u8g2.setDrawColor(0); 
     u8g2.drawStr(2, 8, "MAIN MENU");
-    u8g2.setDrawColor(1); // Normal text
+    u8g2.setDrawColor(1); 
 
-    // Draw Items
     int startY = 22;
-    int lineHeight = 10;
+    int lineHeight = 9; // Slightly tighter spacing to fit 5 items
 
     for(int i=0; i<ITEM_COUNT; i++) {
         int y = startY + (i * lineHeight);
-        
-        // Draw Selection Cursor
         if (i == selectedIndex) {
             u8g2.drawStr(0, y, ">");
-            u8g2.drawBox(8, y - 8, 120, 10); // Highlight bar
-            u8g2.setDrawColor(0); // Invert text for selected item
+            u8g2.drawBox(8, y - 8, 120, 10); 
+            u8g2.setDrawColor(0); 
         } else {
             u8g2.setDrawColor(1);
         }
-
         u8g2.drawUTF8(10, y, menuItems[i]);
     }
-    
-    // Reset draw color for safety
     u8g2.setDrawColor(1);
 }

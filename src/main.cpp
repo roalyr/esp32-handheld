@@ -1,5 +1,5 @@
-// [Revision: v2.4] [Path: src/main.cpp] [Date: 2025-12-10]
-// Description: Added Stopwatch App to system.
+// [Revision: v2.6] [Path: src/main.cpp] [Date: 2025-12-10]
+// Description: Added handling for app exit requests (fixes T9 Editor exit bug).
 
 #include <Arduino.h>
 #include "config.h"
@@ -12,7 +12,7 @@
 #include "apps/gfx_test.h"
 #include "apps/menu.h"
 #include "apps/asteroids.h"
-#include "apps/stopwatch.h" // New
+#include "apps/stopwatch.h"
 
 // --------------------------------------------------------------------------
 // SYSTEM STATE
@@ -24,7 +24,7 @@ SnakeApp appSnake;
 GfxTestApp appGfxTest;
 MenuApp appMenu;
 AsteroidsApp appAsteroids;
-StopwatchApp appStopwatch; // New
+StopwatchApp appStopwatch;
 
 App* currentApp = nullptr;
 
@@ -58,17 +58,34 @@ void loop() {
         char key = activeKeys[i];
         
         if (isJustPressed(key)) {
+            // GLOBAL HOME KEY EXCEPTION
             if (key == 'D') {
-                if (currentApp != &appMenu) switchApp(&appMenu);
-                continue;
+                 // If we are in T9 Editor, let the app handle it (for popup)
+                 if (currentApp == &appT9Editor) {
+                     currentApp->handleInput(key);
+                     continue;
+                 }
+                 
+                 // Otherwise, go to Menu
+                 if (currentApp != &appMenu) switchApp(&appMenu);
+                 continue;
             }
-            if (currentApp) currentApp->handleInput(key);
+
+            // REGULAR APP INPUT
+            if (currentApp) {
+                currentApp->handleInput(key);
+            }
         }
-      }
+      } 
     
       // 3. LOGIC UPDATE
       if (currentApp) {
           currentApp->update();
+
+          // Check for T9 Editor Exit Request
+          if (currentApp == &appT9Editor && appT9Editor.exitRequested) {
+              switchApp(&appMenu);
+          }
           
           // Menu Switching Logic
           if (currentApp == &appMenu) {
@@ -80,7 +97,7 @@ void loop() {
                       case 2: switchApp(&appSnake); break;
                       case 3: switchApp(&appGfxTest); break;
                       case 4: switchApp(&appAsteroids); break; 
-                      case 5: switchApp(&appStopwatch); break; // New
+                      case 5: switchApp(&appStopwatch); break;
                   }
               }
           }

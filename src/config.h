@@ -1,5 +1,5 @@
 // [Revision: v2.2] [Path: src/config.h] [Date: 2025-12-10]
-// Description: Added PHYSICAL_FPS and FRAME_DELAY_MS for game loop timing.
+// Description: Global hardware definitions and timing constants.
 
 #ifndef CONFIG_H
 #define CONFIG_H
@@ -14,9 +14,11 @@
 #define PIN_DC  5
 #define PIN_RST 4
 
+// Key Matrix Dimensions
 const byte ROWS = 4;
 const byte COLS = 5;
 
+// Global hardware pin arrays (Defined in hal.cpp)
 extern byte rowPins[ROWS];
 extern byte colPins[COLS];
 extern char keyMap[ROWS][COLS];
@@ -30,6 +32,6 @@ extern char keyMap[ROWS][COLS];
 
 #define MULTITAP_TIMEOUT 800   
 #define CURSOR_BLINK_RATE 500
-#define DEFAULT_CONTRAST 0     
+#define DEFAULT_CONTRAST 0     // Global default contrast (0-255)
 
 #endif

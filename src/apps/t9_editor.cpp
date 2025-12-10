@@ -1,58 +1,350 @@
-// [Revision: v2.0] [Path: src/apps/t9_editor.cpp] [Date: 2025-12-10]
-// Description: Implementation of T9 Editor Application class.
+// [Revision: v4.1] [Path: src/apps/t9_editor.cpp] [Date: 2025-12-10]
+// Description: Fixed cursor ghosting/hiding, navigation alignment, and exit logic.
 
 #include "t9_editor.h"
 
+const char* HELP_TEXT = 
+    "CONTROLS:\n"
+    "2-9: Type\n"
+    "#: Space\n"
+    "*: Shift\n"
+    "Z: Newline\n"
+    "M: Backspace\n"
+    "\n"
+    "NAV:\n"
+    "A/X: Left/Right\n"
+    "B/Y: Up/Down\n"
+    "\n"
+    "SYSTEM:\n"
+    "C: Help\n"
+    "D: Exit\n";
+
+T9EditorApp::T9EditorApp() {
+    scrollOffset = 0;
+    currentState = STATE_EDITING;
+    fileName = "Unnamed"; // Default as requested
+    helpScrollY = 0;
+    exitSelection = false;
+    exitRequested = false;
+}
+
 void T9EditorApp::start() {
-    u8g2.setContrast(systemContrast); // Ensure standard contrast
-    // Optional: engine.reset() if you want a fresh buffer every time
+    u8g2.setContrast(systemContrast);
+    currentState = STATE_EDITING;
+    exitRequested = false;
+    recalculateLayout();
 }
 
 void T9EditorApp::stop() {
-    // Cleanup if necessary
-}
-
-void T9EditorApp::update() {
-    engine.update();
+    visualLines.clear();
 }
 
 void T9EditorApp::handleInput(char key) {
+    // --- 1. EXIT POPUP HANDLING ---
+    if (currentState == STATE_EXIT_CONFIRM) {
+        if (key == '4') exitSelection = true;  // YES
+        if (key == '6') exitSelection = false; // NO
+        if (key == '5') { // CONFIRM
+            if (exitSelection) {
+                exitRequested = true; // Signal main loop to switch app
+            }
+            currentState = STATE_EDITING; 
+        }
+        return; 
+    }
+
+    // --- 2. HELP POPUP HANDLING ---
+    if (currentState == STATE_HELP) {
+        if (key == 'C') currentState = STATE_EDITING; 
+        if (key == '2') helpScrollY += 5; 
+        if (key == '8') helpScrollY -= 5; 
+        if (helpScrollY > 0) helpScrollY = 0; 
+        return;
+    }
+
+    // --- 3. EDITOR HANDLING ---
+    if (key == 'C') {
+        currentState = STATE_HELP;
+        helpScrollY = 0;
+        return;
+    }
+    
+    if (key == 'D') {
+        currentState = STATE_EXIT_CONFIRM;
+        exitSelection = false; // Default No
+        return;
+    }
+
+    if (key == 'A') { engine.moveCursor(-1); return; }
+    if (key == 'X') { engine.moveCursor(1); return; }
+    if (key == 'B') { moveCursorVertically(-1); return; }
+    if (key == 'Y') { moveCursorVertically(1); return; }
+
     engine.handleInput(key);
 }
 
+void T9EditorApp::moveCursorVertically(int dir) {
+    if (engine.pendingCommit) engine.commit();
+    recalculateLayout(); 
+    
+    // 1. Find cursor line
+    int currentLineIdx = -1;
+    int cursorRelPos = 0;
+    
+    for(int i=0; i<visualLines.size(); i++) {
+        if (visualLines[i].hasCursor) {
+            currentLineIdx = i;
+            cursorRelPos = engine.cursorPos - visualLines[i].byteStartIndex;
+            break;
+        }
+    }
+
+    if (currentLineIdx == -1) return;
+
+    // 2. Target Line
+    int targetLineIdx = currentLineIdx + dir;
+    if (targetLineIdx < 0) targetLineIdx = 0;
+    if (targetLineIdx >= visualLines.size()) targetLineIdx = visualLines.size() - 1;
+    
+    if (targetLineIdx == currentLineIdx) return;
+
+    // 3. Map Offset
+    VisualLine& target = visualLines[targetLineIdx];
+    int newRelPos = cursorRelPos;
+    if (newRelPos > target.byteLength) newRelPos = target.byteLength;
+    
+    // 4. Align to UTF-8 Boundary (Fixes weird navigation)
+    int tentativePos = target.byteStartIndex + newRelPos;
+    
+    // Safety clamp
+    if (tentativePos > engine.textBuffer.length()) tentativePos = engine.textBuffer.length();
+    
+    // Backtrack if we landed in the middle of a multibyte sequence (0b10xxxxxx)
+    while (tentativePos > 0 && (engine.textBuffer[tentativePos] & 0xC0) == 0x80) {
+        tentativePos--;
+    }
+    
+    engine.setCursor(tentativePos);
+}
+
+void T9EditorApp::update() {
+    if (currentState == STATE_EDITING) {
+        engine.update();
+        
+        String currentCandidate = engine.pendingCommit ? engine.getCurrentChar() : "";
+        if (engine.textBuffer != lastProcessedText || 
+            engine.pendingCommit != lastPendingState ||
+            currentCandidate != lastCandidate ||
+            engine.cursorPos != lastCursorPos) {
+            
+            recalculateLayout();
+            
+            lastProcessedText = engine.textBuffer;
+            lastPendingState = engine.pendingCommit;
+            lastCandidate = currentCandidate;
+            lastCursorPos = engine.cursorPos;
+        }
+    }
+}
+
+void T9EditorApp::recalculateLayout() {
+    visualLines.clear();
+
+    String fullText = engine.textBuffer;
+    String displayText = fullText;
+    if (engine.pendingCommit) {
+        String c = engine.getCurrentChar();
+        displayText = fullText.substring(0, engine.cursorPos) + c + fullText.substring(engine.cursorPos);
+    }
+
+    u8g2.setFont(u8g2_font_6x13_t_cyrillic);
+
+    int currentLogicalLine = 1;
+    int start = 0;
+    
+    while (start <= displayText.length()) {
+        int end = displayText.indexOf('\n', start);
+        if (end == -1) end = displayText.length();
+
+        String segment = displayText.substring(start, end);
+        int segmentLen = segment.length();
+        
+        if (segmentLen == 0) {
+             // Empty line case
+             VisualLine vl;
+             vl.content = "";
+             vl.logicalLineNum = currentLogicalLine;
+             vl.byteStartIndex = start;
+             vl.byteLength = 0;
+             vl.hasCursor = (engine.cursorPos == start);
+             visualLines.push_back(vl);
+        } else {
+            int segStart = 0;
+            while (segStart < segmentLen) {
+                int fitLen = 0;
+                while (segStart + fitLen < segmentLen) {
+                    String sub = segment.substring(segStart, segStart + fitLen + 1);
+                    if (u8g2.getUTF8Width(sub.c_str()) > TEXT_AREA_WIDTH) break;
+                    fitLen++;
+                }
+                if (fitLen == 0 && segStart < segmentLen) fitLen = 1;
+
+                VisualLine vl;
+                vl.content = segment.substring(segStart, segStart + fitLen);
+                vl.logicalLineNum = (segStart == 0) ? currentLogicalLine : -1;
+                vl.byteStartIndex = start + segStart;
+                vl.byteLength = fitLen;
+                
+                // --- FIXED CURSOR LOGIC ---
+                // Prevents double cursors on wrap and invisible cursors at newlines.
+                int absStart = start + segStart;
+                int absEnd = absStart + fitLen;
+                bool isSegmentEnd = (segStart + fitLen == segmentLen);
+
+                // Normal Case: Cursor inside the line
+                if (engine.cursorPos >= absStart && engine.cursorPos < absEnd) {
+                    vl.hasCursor = true;
+                }
+                // Wrap Case: Cursor at end of wrapped line belongs to NEXT line, so we ignore it here.
+                // Newline/EOF Case: Cursor at very end of segment belongs to THIS line.
+                else if (isSegmentEnd && engine.cursorPos == absEnd) {
+                    vl.hasCursor = true;
+                } else {
+                    vl.hasCursor = false;
+                }
+                
+                visualLines.push_back(vl);
+                segStart += fitLen;
+            }
+        }
+        start = end + 1;
+        currentLogicalLine++;
+    }
+    
+    // Auto-Scroll
+    int cursorLineIndex = 0;
+    for(int i=0; i<visualLines.size(); i++) {
+        if (visualLines[i].hasCursor) {
+            cursorLineIndex = i;
+            break;
+        }
+    }
+    if (cursorLineIndex < scrollOffset) scrollOffset = cursorLineIndex;
+    else if (cursorLineIndex >= scrollOffset + VISIBLE_LINES) scrollOffset = cursorLineIndex - VISIBLE_LINES + 1;
+}
+
+void T9EditorApp::renderHeader() {
+    u8g2.setFont(FONT_SMALL);
+    u8g2.drawBox(0, 0, 128, 11);
+    u8g2.setDrawColor(0);
+    
+    String dispName = fileName;
+    if (dispName.length() > 10) dispName = dispName.substring(0, 9) + "~";
+    u8g2.drawStr(2, 9, dispName.c_str());
+    
+    u8g2.drawStr(80, 9, "C-HELP");
+    u8g2.setDrawColor(1);
+}
+
+void T9EditorApp::renderHelpPopup() {
+    u8g2.setDrawColor(0);
+    u8g2.drawBox(10, 10, 108, 44);
+    u8g2.setDrawColor(1);
+    u8g2.drawFrame(10, 10, 108, 44);
+    
+    int x = 14;
+    int y = 20 + helpScrollY;
+    int lineH = 9;
+    String h = HELP_TEXT;
+    int start = 0;
+    while(start < h.length()) {
+        int end = h.indexOf('\n', start);
+        if (end == -1) end = h.length();
+        String line = h.substring(start, end);
+        
+        if (y > 10 && y < 54) {
+             u8g2.drawStr(x, y, line.c_str());
+        }
+        y += lineH;
+        start = end + 1;
+    }
+}
+
+void T9EditorApp::renderExitPopup() {
+    u8g2.setDrawColor(0);
+    u8g2.drawBox(20, 15, 88, 34);
+    u8g2.setDrawColor(1);
+    u8g2.drawFrame(20, 15, 88, 34);
+    
+    u8g2.setFont(FONT_SMALL);
+    u8g2.drawStr(36, 26, "EXIT FILE?");
+    
+    if (exitSelection) {
+        u8g2.drawBox(25, 32, 35, 12); 
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(32, 41, "YES");
+        u8g2.setDrawColor(1);
+        u8g2.drawStr(75, 41, "NO");
+    } else {
+        u8g2.drawBox(68, 32, 30, 12); 
+        u8g2.drawStr(32, 41, "YES");
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(75, 41, "NO");
+        u8g2.setDrawColor(1);
+    }
+}
+
 void T9EditorApp::render() {
-  // 1. Draw Header
-  u8g2.drawHLine(0, 10, 128);
-  u8g2.setFont(FONT_SMALL); 
-  u8g2.drawUTF8(2, 8, "T9 EDITOR v2.0");
-  
-  // 2. Setup Text Position
-  u8g2.setFont(u8g2_font_6x13_t_cyrillic); 
-  int x = 2; 
-  int y = 25;
-  
-  // 3. Draw Committed Text
-  u8g2.drawUTF8(x, y, engine.textBuffer.c_str());
-  
-  // 4. Draw Pending Character (Candidate)
-  if (engine.pendingCommit) {
-    String pChar = engine.getCurrentChar();
-    int width = u8g2.getUTF8Width(engine.textBuffer.c_str());
+    renderHeader();
+
+    if (currentState == STATE_HELP) {
+        renderHelpPopup();
+        return;
+    }
     
-    // Draw candidate & underline
-    u8g2.drawUTF8(x + width, y, pChar.c_str());
-    u8g2.drawHLine(x + width, y+2, u8g2.getUTF8Width(pChar.c_str()));
+    if (currentState == STATE_EXIT_CONFIRM) {
+        renderExitPopup();
+        return; 
+    }
+
+    u8g2.drawVLine(GUTTER_WIDTH, 12, 52);
+    u8g2.setFont(u8g2_font_6x13_t_cyrillic); 
     
-    // Draw Timeout Progress Bar
-    long timeLeft = MULTITAP_TIMEOUT - (millis() - engine.getLastPressTime());
-    int barWidth = map(timeLeft, 0, MULTITAP_TIMEOUT, 0, 10);
-    if (barWidth < 0) barWidth = 0; 
-    u8g2.drawHLine(x + width, y+4, barWidth);
-  }
-  
-  // 5. Draw Blinking Cursor
-  if (!engine.pendingCommit && (millis() / CURSOR_BLINK_RATE) % 2) {
-    int width = u8g2.getUTF8Width(engine.textBuffer.c_str());
-    u8g2.drawVLine(x + width + 1, y - 10, 12);
-  }
+    int yStart = HEADER_HEIGHT + LINE_HEIGHT; 
+    
+    for(int i=0; i<VISIBLE_LINES; i++) {
+        int idx = scrollOffset + i;
+        if (idx >= visualLines.size()) break;
+
+        VisualLine& vl = visualLines[idx];
+        int y = yStart + (i * LINE_HEIGHT);
+
+        if (vl.logicalLineNum != -1) {
+            u8g2.setFont(u8g2_font_micro_tr); 
+            u8g2.setCursor(1, y - 2);
+            u8g2.print(vl.logicalLineNum);
+            u8g2.setFont(u8g2_font_6x13_t_cyrillic); 
+        }
+
+        u8g2.drawUTF8(GUTTER_WIDTH + 2, y, vl.content.c_str());
+
+        if (vl.hasCursor) {
+            int localCursorIdx = engine.cursorPos - vl.byteStartIndex;
+            if (localCursorIdx < 0) localCursorIdx = 0;
+            if (localCursorIdx > vl.content.length()) localCursorIdx = vl.content.length();
+            
+            String preCursor = vl.content.substring(0, localCursorIdx);
+            int cursorX = GUTTER_WIDTH + 2 + u8g2.getUTF8Width(preCursor.c_str());
+            
+            if (engine.pendingCommit) {
+                String c = engine.getCurrentChar();
+                int charW = u8g2.getUTF8Width(c.c_str());
+                u8g2.drawHLine(cursorX, y+2, charW);
+            } else {
+                if ((millis() / CURSOR_BLINK_RATE) % 2) {
+                    u8g2.drawVLine(cursorX, y - 10, 10);
+                }
+            }
+        }
+    }
 }

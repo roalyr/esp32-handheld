@@ -1,5 +1,5 @@
-// [Revision: v1.0] [Path: src/t9_engine.cpp] [Date: 2025-12-09]
-// Description: Implementation of T9 multi-tap logic with UTF-8 support.
+// [Revision: v2.1] [Path: src/t9_engine.cpp] [Date: 2025-12-10]
+// Description: Implemented cursor-aware insertion and deletion.
 
 #include "t9_engine.h"
 
@@ -32,19 +32,16 @@ int T9Engine::getUtf8Length(const char* str) {
   int len = 0;
   int i = 0;
   while(str[i] != 0) {
-    // 0xC0 mask checks for start of multibyte sequence
     if ((str[i] & 0xC0) != 0x80) len++;
     i++;
   }
   return len;
 }
 
-// Extract specific character at visual index from UTF-8 string
 String T9Engine::getUtf8CharAtIndex(const char* str, int index) {
   int count = 0;
   int i = 0;
   int start = 0;
-  
   while(str[i] != 0) {
     if ((str[i] & 0xC0) != 0x80) { 
         if (count == index) start = i;
@@ -57,7 +54,6 @@ String T9Engine::getUtf8CharAtIndex(const char* str, int index) {
     }
     i++;
   }
-  // Handle last character case
   if (count == index + 1) {
       String res = "";
       for(int k=start; k<i; k++) res += str[k];
@@ -65,10 +61,6 @@ String T9Engine::getUtf8CharAtIndex(const char* str, int index) {
   }
   return "";
 }
-
-// --------------------------------------------------------------------------
-// ENGINE LOGIC
-// --------------------------------------------------------------------------
 
 unsigned long T9Engine::getLastPressTime() { return lastPressTime; }
 
@@ -80,13 +72,45 @@ String T9Engine::getCurrentChar() {
   String c = getUtf8CharAtIndex(t9Map[mapIndex], cycleIndex);
   
   if (isShifted) {
-      // Basic ASCII upper-casing
       if (c.length() == 1 && c[0] >= 'a' && c[0] <= 'z') {
         c = String((char)(c[0] - 32));
       }
-      // Note: Cyrillic uppercase implementation omitted for brevity
   }
   return c;
+}
+
+void T9Engine::moveCursor(int delta) {
+    if (pendingCommit) commit();
+
+    // Move Forward
+    if (delta > 0) {
+        for(int i=0; i<delta; i++) {
+            if (cursorPos >= textBuffer.length()) break;
+            // Advance one UTF-8 char
+            cursorPos++;
+            while (cursorPos < textBuffer.length() && (textBuffer[cursorPos] & 0xC0) == 0x80) {
+                cursorPos++;
+            }
+        }
+    }
+    // Move Backward
+    else if (delta < 0) {
+        for(int i=0; i < -delta; i++) {
+            if (cursorPos <= 0) break;
+            // Rewind one UTF-8 char
+            cursorPos--;
+            while (cursorPos > 0 && (textBuffer[cursorPos] & 0xC0) == 0x80) {
+                cursorPos--;
+            }
+        }
+    }
+}
+
+void T9Engine::setCursor(int pos) {
+    if (pendingCommit) commit();
+    cursorPos = pos;
+    if (cursorPos < 0) cursorPos = 0;
+    if (cursorPos > textBuffer.length()) cursorPos = textBuffer.length();
 }
 
 void T9Engine::handleInput(char key) {
@@ -96,13 +120,14 @@ void T9Engine::handleInput(char key) {
   if (key == 'M') { 
     if (pendingCommit) {
         pendingCommit = false;
-    } else if (textBuffer.length() > 0) {
-        // Remove last UTF-8 character
-        while(textBuffer.length() > 0) {
-          char lastByte = textBuffer[textBuffer.length()-1];
-          textBuffer.remove(textBuffer.length() - 1);
-          if ((lastByte & 0xC0) != 0x80) break; 
+    } else if (cursorPos > 0) {
+        // Find start of previous character
+        int prevPos = cursorPos - 1;
+        while (prevPos > 0 && (textBuffer[prevPos] & 0xC0) == 0x80) {
+            prevPos--;
         }
+        textBuffer.remove(prevPos, cursorPos - prevPos);
+        cursorPos = prevPos;
     }
     return;
   }
@@ -110,14 +135,16 @@ void T9Engine::handleInput(char key) {
   // NEWLINE (Z)
   if (key == 'Z') {
     if (pendingCommit) commit();
-    textBuffer += '\n';
+    textBuffer = textBuffer.substring(0, cursorPos) + "\n" + textBuffer.substring(cursorPos);
+    cursorPos++;
     return;
   }
   
   // SPACE (#)
   if (key == '#') {
       if (pendingCommit) commit();
-      textBuffer += ' ';
+      textBuffer = textBuffer.substring(0, cursorPos) + " " + textBuffer.substring(cursorPos);
+      cursorPos++;
       return;
   }
   
@@ -129,14 +156,12 @@ void T9Engine::handleInput(char key) {
 
   // NUMERIC KEYS (0-9)
   if (key >= '0' && key <= '9') {
-    // If same key pressed within timeout -> cycle character
     if (pendingCommit && key == pendingKey && (now - lastPressTime < MULTITAP_TIMEOUT)) {
       cycleIndex++;
       int mapLen = getUtf8Length(t9Map[key - '0']);
       if (cycleIndex >= mapLen) cycleIndex = 0; 
       lastPressTime = now;
     } else {
-      // New key pressed -> commit previous and start new cycle
       if (pendingCommit) commit();
       pendingKey = key;
       cycleIndex = 0;
@@ -144,25 +169,27 @@ void T9Engine::handleInput(char key) {
       lastPressTime = now;
     }
   } else {
-      // Any other key commits current character
       if (pendingCommit) commit();
   }
 }
 
 void T9Engine::update() {
-  // Auto-commit if timeout reached
   if (pendingCommit && (millis() - lastPressTime > MULTITAP_TIMEOUT)) {
     commit();
   }
 }
 
 void T9Engine::commit() {
-  textBuffer += getCurrentChar();
+  String c = getCurrentChar();
+  textBuffer = textBuffer.substring(0, cursorPos) + c + textBuffer.substring(cursorPos);
+  cursorPos += c.length();
+  
   pendingCommit = false;
   cycleIndex = 0;
 }
 
 void T9Engine::reset() {
     textBuffer = "";
+    cursorPos = 0;
     pendingCommit = false;
 }

@@ -1,128 +1,449 @@
+--- Start of ./src/apps/asteroids.cpp ---
+
+// [Revision: v1.1] [Path: src/apps/asteroids.cpp] [Date: 2025-12-10]
+// Description: Asteroids. Tuned for 60Hz loop. Standardized Game Over font.
+
+#include "asteroids.h"
+
+// Physics Constants (Tuned for 60 FPS)
+const float DRAG = 0.985;      // Slightly less drag to maintain momentum
+const float ACCEL = 0.15;      // Stronger thrust for responsiveness
+const float ROT_SPEED = 0.12;  // Faster rotation
+const float MAX_VEL = 4.0;     // Higher top speed
+const int SCREEN_W = 128;
+const int SCREEN_H = 64;
+
+AsteroidsApp::AsteroidsApp() {
+    bullets.resize(5);   
+    particles.resize(20); 
+}
+
+void AsteroidsApp::start() {
+    u8g2.setContrast(systemContrast);
+    resetGame();
+}
+
+void AsteroidsApp::stop() {
+    asteroids.clear();
+}
+
+void AsteroidsApp::resetGame() {
+    score = 0;
+    level = 1;
+    gameOver = false;
+    shipPos = {SCREEN_W / 2.0f, SCREEN_H / 2.0f};
+    shipVel = {0, 0};
+    shipAngle = -PI / 2; 
+    
+    asteroids.clear();
+    for(int i=0; i<3; i++) {
+        spawnAsteroid(random(0, SCREEN_W), random(0, SCREEN_H), 3);
+    }
+}
+
+void AsteroidsApp::spawnAsteroid(float x, float y, int size) {
+    Asteroid a;
+    a.pos = {x, y};
+    float speed = (4 - size) * 0.4; // Adjusted speed scale
+    float angle = random(0, 628) / 100.0;
+    a.vel = {cos(angle) * speed, sin(angle) * speed};
+    a.size = size;
+    a.radius = size * 3 + 2; 
+    a.seed = random(0, 100);
+    a.active = true;
+    asteroids.push_back(a);
+}
+
+void AsteroidsApp::spawnBullet() {
+    for(auto &b : bullets) {
+        if(!b.active) {
+            b.active = true;
+            b.pos = shipPos;
+            b.vel.x = shipVel.x + cos(shipAngle) * 5.0; // Faster bullets
+            b.vel.y = shipVel.y + sin(shipAngle) * 5.0;
+            b.life = 50; // Last slightly longer (approx 0.8s)
+            break;
+        }
+    }
+}
+
+void AsteroidsApp::createExplosion(float x, float y, int count) {
+    int spawned = 0;
+    for(auto &p : particles) {
+        if(!p.active && spawned < count) {
+            p.active = true;
+            p.pos = {x, y};
+            float angle = random(0, 628) / 100.0;
+            float speed = random(50, 250) / 100.0;
+            p.vel = {cos(angle) * speed, sin(angle) * speed};
+            p.life = random(15, 30); // ~0.5s at 60fps
+            spawned++;
+        }
+    }
+}
+
+// --------------------------------------------------------------------------
+// INPUT & UPDATE
+// --------------------------------------------------------------------------
+
+void AsteroidsApp::handleInput(char key) {
+    if (gameOver && key == '5') {
+        resetGame();
+        return;
+    }
+    if (!gameOver && key == '5') {
+        spawnBullet();
+    }
+}
+
+void AsteroidsApp::update() {
+    if (gameOver) return;
+
+    // 1. POLL INPUT
+    bool left = false, right = false, thrust = false;
+    for(int i=0; i<activeKeyCount; i++) {
+        if (activeKeys[i] == '4') left = true;
+        if (activeKeys[i] == '6') right = true;
+        if (activeKeys[i] == '2') thrust = true;
+    }
+
+    // 2. SHIP PHYSICS
+    if (left) shipAngle -= ROT_SPEED;
+    if (right) shipAngle += ROT_SPEED;
+    
+    isThrusting = thrust;
+    if (thrust) {
+        shipVel.x += cos(shipAngle) * ACCEL;
+        shipVel.y += sin(shipAngle) * ACCEL;
+    }
+    
+    // Drag
+    shipVel.x *= DRAG;
+    shipVel.y *= DRAG;
+    
+    // Cap Speed (Manual clamp to keep vector direction correct roughly)
+    // Simple clamp per axis is okay for this retro feel, or normalize vector
+    float speed = sqrt(shipVel.x*shipVel.x + shipVel.y*shipVel.y);
+    if (speed > MAX_VEL) {
+        shipVel.x = (shipVel.x / speed) * MAX_VEL;
+        shipVel.y = (shipVel.y / speed) * MAX_VEL;
+    }
+    
+    shipPos.x += shipVel.x;
+    shipPos.y += shipVel.y;
+
+    // Wrap
+    if (shipPos.x < 0) shipPos.x += SCREEN_W;
+    if (shipPos.x > SCREEN_W) shipPos.x -= SCREEN_W;
+    if (shipPos.y < 0) shipPos.y += SCREEN_H;
+    if (shipPos.y > SCREEN_H) shipPos.y -= SCREEN_H;
+
+    // 3. BULLETS
+    for(auto &b : bullets) {
+        if (b.active) {
+            b.pos.x += b.vel.x;
+            b.pos.y += b.vel.y;
+            b.life--;
+            
+            if (b.pos.x < 0) b.pos.x += SCREEN_W;
+            if (b.pos.x > SCREEN_W) b.pos.x -= SCREEN_W;
+            if (b.pos.y < 0) b.pos.y += SCREEN_H;
+            if (b.pos.y > SCREEN_H) b.pos.y -= SCREEN_H;
+
+            if (b.life <= 0) b.active = false;
+        }
+    }
+
+    // 4. PARTICLES
+    for(auto &p : particles) {
+        if (p.active) {
+            p.pos.x += p.vel.x;
+            p.pos.y += p.vel.y;
+            p.life--;
+            if (p.life <= 0) p.active = false;
+        }
+    }
+
+    // 5. ASTEROIDS & COLLISIONS
+    bool levelCleared = true;
+    
+    for(auto &a : asteroids) {
+        if (!a.active) continue;
+        levelCleared = false;
+        
+        a.pos.x += a.vel.x;
+        a.pos.y += a.vel.y;
+        
+        if (a.pos.x < 0) a.pos.x += SCREEN_W;
+        if (a.pos.x > SCREEN_W) a.pos.x -= SCREEN_W;
+        if (a.pos.y < 0) a.pos.y += SCREEN_H;
+        if (a.pos.y > SCREEN_H) a.pos.y -= SCREEN_H;
+
+        // Collision: Ship
+        if (checkCollision(shipPos.x, shipPos.y, 3, a.pos.x, a.pos.y, a.radius)) {
+            createExplosion(shipPos.x, shipPos.y, 10);
+            gameOver = true;
+        }
+
+        // Collision: Bullets
+        for(auto &b : bullets) {
+            if (b.active && checkCollision(b.pos.x, b.pos.y, 1, a.pos.x, a.pos.y, a.radius)) {
+                b.active = false;
+                a.active = false;
+                createExplosion(a.pos.x, a.pos.y, 5);
+                score += 100 / a.size;
+                if (a.size > 1) {
+                    spawnAsteroid(a.pos.x, a.pos.y, a.size - 1);
+                    spawnAsteroid(a.pos.x, a.pos.y, a.size - 1);
+                }
+                break;
+            }
+        }
+    }
+
+    if (levelCleared) {
+        level++;
+        shipPos = {SCREEN_W/2.0f, SCREEN_H/2.0f};
+        shipVel = {0,0};
+        for(int i=0; i<level+2; i++) {
+            spawnAsteroid(random(0,SCREEN_W), random(0,SCREEN_H), 3);
+        }
+    }
+}
+
+bool AsteroidsApp::checkCollision(float x1, float y1, float r1, float x2, float y2, float r2) {
+    float dx = x1 - x2;
+    float dy = y1 - y2;
+    float distSq = dx*dx + dy*dy;
+    float rSum = r1 + r2;
+    return distSq < (rSum * rSum);
+}
+
+void AsteroidsApp::drawWireframeModel(const float* coords, int numPoints, float x, float y, float angle, float scale) {
+    float cosA = cos(angle);
+    float sinA = sin(angle);
+    
+    int x0, y0, x1, y1;
+    
+    auto transform = [&](int idx, int &outX, int &outY) {
+        float px = coords[idx*2] * scale;
+        float py = coords[idx*2+1] * scale;
+        outX = x + (px * cosA - py * sinA);
+        outY = y + (px * sinA + py * cosA);
+    };
+
+    transform(0, x0, y0);
+    for(int i=1; i<=numPoints; i++) {
+        int idx = i % numPoints; 
+        transform(idx, x1, y1);
+        u8g2.drawLine(x0, y0, x1, y1);
+        x0 = x1;
+        y0 = y1;
+    }
+}
+
+void AsteroidsApp::render() {
+    if (gameOver) {
+        // Standardized Game Over Screen
+        u8g2.setFont(u8g2_font_ncenB12_tr);
+        u8g2.drawStr(8, 30, "GAME OVER");
+        
+        char buf[20];
+        sprintf(buf, "SCORE: %d", score);
+        u8g2.setFont(FONT_SMALL);
+        u8g2.drawStr(30, 50, buf);
+        u8g2.drawStr(10, 62, "PRESS 5 TO RESTART");
+        return;
+    }
+
+    // Ship
+    const float shipModel[] = { 4,0, -3,-3, -2,0, -3,3 }; 
+    drawWireframeModel(shipModel, 4, shipPos.x, shipPos.y, shipAngle, 1.0);
+    
+    // Thrust
+    if (isThrusting) {
+        u8g2.drawLine(
+            shipPos.x - cos(shipAngle)*5, 
+            shipPos.y - sin(shipAngle)*5,
+            shipPos.x - cos(shipAngle)*2, 
+            shipPos.y - sin(shipAngle)*2
+        );
+    }
+
+    // Bullets
+    for(auto &b : bullets) {
+        if(b.active) u8g2.drawDisc(b.pos.x, b.pos.y, 2);
+    }
+
+    // Particles
+    for(auto &p : particles) {
+        if(p.active) u8g2.drawPixel(p.pos.x, p.pos.y);
+    }
+
+    // Asteroids
+    for(auto &a : asteroids) {
+        if(a.active) {
+            u8g2.drawDisc(a.pos.x, a.pos.y, a.radius);
+        }
+    }
+
+    // UI
+    char scoreBuf[16];
+    sprintf(scoreBuf, "%d", score);
+    u8g2.setFont(u8g2_font_micro_tr); 
+    u8g2.drawStr(2, 6, scoreBuf);
+    u8g2.drawFrame(0, 0, 128, 64);
+
+}
+
 --- Start of ./src/apps/gfx_test.cpp ---
 
-// [Revision: v1.0] [Path: src/apps/gfx_test.cpp] [Date: 2025-12-09]
-// Description: Implementation of the Graphics Test screen.
-// Notes: automatically cycles contrast 0-255 to test display biasing.
+// [Revision: v2.2] [Path: src/apps/gfx_test.cpp] [Date: 2025-12-10]
+// Description: GFX Test implementation. 
+// Changes: Converted contrast cycle to non-blocking millis() timer.
+//          Target speed: 0-255 sweep in ~1 second (Step delay ~4ms).
 
 #include "gfx_test.h"
 
-// --------------------------------------------------------------------------
-// LOCAL STATE
-// --------------------------------------------------------------------------
-
-// Keep these static so they persist between frames but don't pollute global namespace
-static int currentContrast = 0;
-static int contrastDir = 5;
-
-// --------------------------------------------------------------------------
-// RENDER LOGIC
-// --------------------------------------------------------------------------
-
-void renderGfxTest() {
-    // 1. Update Contrast Physics
-    currentContrast += contrastDir;
+GfxTestApp::GfxTestApp() {
+    currentContrast = 0;
+    contrastDir = 1; // Step by 1 to cover all values
+    lastStepTime = 0;
     
-    // Bounce logic
-    if (currentContrast > 255) {
-        currentContrast = 255;
-        contrastDir = -5;
-    } else if (currentContrast < 0) {
-        currentContrast = 0;
-        contrastDir = 5;
+    // Calculate interval: 1000ms / 255 steps ~= 4ms
+    stepInterval = 40; 
+}
+
+void GfxTestApp::start() {
+    // Start test from the current system value
+    currentContrast = systemContrast;
+    contrastDir = 1;
+    lastStepTime = millis();
+}
+
+void GfxTestApp::stop() {
+    // Revert to global system preference when leaving the test
+    u8g2.setContrast(systemContrast);
+}
+
+void GfxTestApp::handleInput(char key) {
+    // No input handling
+}
+
+void GfxTestApp::update() {
+    // Timer Check
+    if (millis() - lastStepTime >= stepInterval) {
+        lastStepTime = millis();
+
+        // Update Contrast
+        currentContrast += contrastDir;
+        
+        // Bounce logic
+        if (currentContrast >= 50) {
+            currentContrast = 50;
+            contrastDir = -1; // Reverse direction
+        } else if (currentContrast <= 0) {
+            currentContrast = 0;
+            contrastDir = 1;  // Reverse direction
+        }
+        
+        // Apply immediately
+        u8g2.setContrast(currentContrast);
     }
-    
-    // Apply contrast immediately
-    u8g2.setContrast(currentContrast);
+}
 
-    // 2. Text Elements
+void GfxTestApp::render() {
     u8g2.setFont(FONT_SMALL);
-    u8g2.drawStr(0, 8, "CONTRAST CYCLE");
+    u8g2.drawStr(0, 8, "CONTRAST SWEEP");
 
-    // 3. Checkerboard Pattern (Test pixel clarity)
-    // Optimization: Draw pixels in a strided loop
+    // Checkerboard
     for(int y=10; y<50; y+=2) { 
         for(int x=0; x<128; x+=2) {
             if ((x+y)%4 == 0) u8g2.drawPixel(x, y);
         }
     }
     
-    // 4. Geometry Tests
-    u8g2.drawFrame(10, 20, 108, 20); // Outer box
-    u8g2.drawBox(12, 22, 20, 16);    // Filled box
-    u8g2.drawFrame(34, 22, 20, 16);  // Empty box
-    
-    // Vertical lines test
+    // Geometry
+    u8g2.drawFrame(10, 20, 108, 20);
+    u8g2.drawBox(12, 22, 20, 16);
+    u8g2.drawFrame(34, 22, 20, 16);
     for(int i=56; i<76; i+=2) u8g2.drawVLine(i, 22, 16); 
     
-    // 5. Status Display
+    // Status
     char stateBuf[32];
-    sprintf(stateBuf, "CONTRAST: %d", currentContrast);
+    sprintf(stateBuf, "VALUE: %d", currentContrast);
     u8g2.drawStr(0, 56, stateBuf);
     
-    // Navigation Hint
-    u8g2.drawStr(0, 64, "PRESS X/Y TO EXIT");
+    u8g2.drawStr(0, 64, "PRESS D TO EXIT");
 }
 
 --- Start of ./src/apps/key_tester.cpp ---
 
-// [Revision: v1.0] [Path: src/apps/key_tester.cpp] [Date: 2025-12-09]
-// Description: Implementation of the Key Matrix Tester application.
+// [Revision: v2.0] [Path: src/apps/key_tester.cpp] [Date: 2025-12-10]
+// Description: Implementation of the Key Matrix Tester Application.
 
 #include "key_tester.h"
 
-// --------------------------------------------------------------------------
-// LOCAL STATE
-// --------------------------------------------------------------------------
-
-const int HISTORY_SIZE = 14;
-char keyHistory[HISTORY_SIZE + 1];
-
-// --------------------------------------------------------------------------
-// LOGIC
-// --------------------------------------------------------------------------
-
-void setupTester() {
-  // Clear history buffer with spaces
-  for(int i=0; i<HISTORY_SIZE; i++) keyHistory[i] = ' ';
-  keyHistory[HISTORY_SIZE] = '\0';
+KeyTesterApp::KeyTesterApp() {
+    lastPressedKey = ' ';
+    // Initialize history buffer
+    for(int i=0; i<HISTORY_SIZE; i++) keyHistory[i] = ' ';
+    keyHistory[HISTORY_SIZE] = '\0';
 }
 
-void addToTesterHistory(char c) {
+void KeyTesterApp::start() {
+    u8g2.setContrast(systemContrast);
+    // Clear state on entry
+    lastPressedKey = ' ';
+    for(int i=0; i<HISTORY_SIZE; i++) keyHistory[i] = ' ';
+}
+
+void KeyTesterApp::stop() {
+    // No cleanup required
+}
+
+void KeyTesterApp::update() {
+    // No continuous logic needed for this app
+}
+
+void KeyTesterApp::addToHistory(char c) {
     // Shift history left
     for(int i=0; i < HISTORY_SIZE-1; i++) keyHistory[i] = keyHistory[i+1];
     // Add new character at the end
     keyHistory[HISTORY_SIZE-1] = c;
 }
 
-// --------------------------------------------------------------------------
-// RENDER
-// --------------------------------------------------------------------------
+void KeyTesterApp::handleInput(char key) {
+    lastPressedKey = key;
+    addToHistory(key);
+}
 
-void renderKeyTester(char lastKey, char* heldKeys, int count) {
+void KeyTesterApp::render() {
     // 1. Draw Header Frame
     u8g2.drawFrame(0, 0, 128, 15);
     u8g2.setFont(FONT_SMALL);
     
-    // 2. Draw History (inside the frame)
+    // 2. Draw History
     u8g2.drawUTF8(2, 10, keyHistory);
 
-    // 3. Last Key Display (Large Font)
+    // 3. Last Key Display
     u8g2.drawUTF8(0, 28, "LAST PRESSED:");
-    if (lastKey != ' ') {
+    if (lastPressedKey != ' ') {
         u8g2.setFont(u8g2_font_inr24_t_cyrillic);
-        char keyStr[2] = {lastKey, '\0'}; 
+        char keyStr[2] = {lastPressedKey, '\0'}; 
         u8g2.drawUTF8(50, 58, keyStr);
     }
     
-    // 4. Currently Held Keys List
+    // 4. Currently Held Keys
+    // Accessing global activeKeys from hal.h
     u8g2.setFont(FONT_SMALL);
     u8g2.drawUTF8(0, 63, "HELD:");
     int xPos = 25;
     
-    for(int i=0; i<count; i++) {
+    for(int i=0; i<activeKeyCount; i++) {
        char buf[4];
        buf[0] = '[';
-       buf[1] = heldKeys[i];
+       buf[1] = activeKeys[i];
        buf[2] = ']';
        buf[3] = '\0';
        u8g2.drawStr(xPos, 63, buf);
@@ -130,207 +451,686 @@ void renderKeyTester(char lastKey, char* heldKeys, int count) {
     }
 }
 
+--- Start of ./src/apps/menu.cpp ---
+
+// [Revision: v2.2] [Path: src/apps/menu.cpp] [Date: 2025-12-10]
+// Description: Menu with Scrolling Viewport.
+// Visuals: Shows 4 items at a time.
+
+#include "menu.h"
+
+// Configuration
+const int VISIBLE_ITEMS = 4;
+const int HEADER_HEIGHT = 12;
+const int LINE_HEIGHT = 10;
+const int START_Y = 24; // Y position of the first item line
+
+MenuApp::MenuApp() {
+    selectedIndex = 0;
+    scrollOffset = 0;
+    pendingSwitchIndex = -1;
+}
+
+void MenuApp::start() {
+    u8g2.setContrast(systemContrast);
+    pendingSwitchIndex = -1;
+    // Keep previous selection/scroll state or reset if desired:
+    // selectedIndex = 0; 
+    // scrollOffset = 0;
+}
+
+void MenuApp::stop() {}
+void MenuApp::update() {}
+
+int MenuApp::getPendingSwitch() {
+    int temp = pendingSwitchIndex;
+    pendingSwitchIndex = -1; 
+    return temp;
+}
+
+void MenuApp::handleInput(char key) {
+    // UP (2)
+    if (key == '2') {
+        selectedIndex--;
+        if (selectedIndex < 0) {
+            // Wrap to bottom
+            selectedIndex = ITEM_COUNT - 1;
+            scrollOffset = ITEM_COUNT - VISIBLE_ITEMS;
+            if (scrollOffset < 0) scrollOffset = 0;
+        } else if (selectedIndex < scrollOffset) {
+            // Scroll Up
+            scrollOffset--;
+        }
+    }
+    
+    // DOWN (8)
+    if (key == '8') {
+        selectedIndex++;
+        if (selectedIndex >= ITEM_COUNT) {
+            // Wrap to top
+            selectedIndex = 0;
+            scrollOffset = 0;
+        } else if (selectedIndex >= scrollOffset + VISIBLE_ITEMS) {
+            // Scroll Down
+            scrollOffset++;
+        }
+    }
+    
+    // ENTER (5)
+    if (key == '5') {
+        pendingSwitchIndex = selectedIndex;
+    }
+}
+
+void MenuApp::render() {
+    u8g2.setFont(FONT_SMALL);
+    
+    // 1. Draw Header
+    u8g2.drawBox(0, 0, 128, HEADER_HEIGHT);
+    u8g2.setDrawColor(0); 
+    u8g2.drawStr(2, 9, "MAIN MENU");
+    u8g2.setDrawColor(1); 
+    
+    // 2. Draw Scrollbar (Simple indicator)
+    // Draw a line on the right edge representing the full list size
+    // and a box representing the current view
+    int scrollBarH = 64 - HEADER_HEIGHT;
+    int knobH = (scrollBarH * VISIBLE_ITEMS) / ITEM_COUNT;
+    int knobY = HEADER_HEIGHT + (scrollBarH * scrollOffset) / ITEM_COUNT;
+    
+    u8g2.drawVLine(126, HEADER_HEIGHT, scrollBarH); // Track
+    u8g2.drawBox(125, knobY, 3, knobH);             // Knob
+
+    // 3. Draw Visible Items
+    for(int i = 0; i < VISIBLE_ITEMS; i++) {
+        int itemIndex = scrollOffset + i;
+        if (itemIndex >= ITEM_COUNT) break;
+
+        int y = START_Y + (i * LINE_HEIGHT);
+        
+        // Highlight Selection
+        if (itemIndex == selectedIndex) {
+            u8g2.drawStr(0, y, ">");
+            u8g2.drawBox(8, y - 8, 115, 10); 
+            u8g2.setDrawColor(0); 
+        } else {
+            u8g2.setDrawColor(1);
+        }
+        
+        u8g2.drawUTF8(10, y, menuItems[itemIndex]);
+    }
+    
+    // Safety reset
+    u8g2.setDrawColor(1);
+}
+
 --- Start of ./src/apps/snake.cpp ---
 
-// [Revision: v1.1] [Path: src/apps/snake.cpp] [Date: 2025-12-09]
-// Description: Implementation of Snake Game logic.
-// Changes: Added randomSeed initialization for true randomness.
+// [Revision: v2.1] [Path: src/apps/snake.cpp] [Date: 2025-12-10]
+// Description: Snake Game. 
+// Changes: Converted to frame-counter timing (Fixed FPS) and standardized Game Over font.
 
 #include "snake.h"
 
-// --------------------------------------------------------------------------
-// CONFIGURATION
-// --------------------------------------------------------------------------
-
-#define SNAKE_BLOCK_SIZE 4
-#define BOARD_W (128 / SNAKE_BLOCK_SIZE)
-#define BOARD_H (64 / SNAKE_BLOCK_SIZE)
-#define MAX_SNAKE_LEN 100
-
-struct Point { 
-    int x, y;
-};
-
-// --------------------------------------------------------------------------
-// STATE
-// --------------------------------------------------------------------------
-
-Point snake[MAX_SNAKE_LEN];
-int snakeLen = 3;
-int dirX = 1; 
-int dirY = 0;
-Point food;
-
-bool gameOver = false;
-unsigned long lastMoveTime = 0;
-int gameSpeed = 150; // ms per frame
-
-// --------------------------------------------------------------------------
-// LOGIC
-// --------------------------------------------------------------------------
-
-void spawnFood() {
-  // Random coordinates within board limits (1px buffer from edge)
-  food.x = random(1, BOARD_W - 1);
-  food.y = random(1, BOARD_H - 1);
+SnakeApp::SnakeApp() {
+    snakeLen = 3;
 }
 
-void setupSnake() {
-  // Initialize Random Generator (Fixes static food pattern)
-  randomSeed(esp_random());
-
-  snakeLen = 3;
-  // Start position
-  snake[0] = {10, 10};
-  snake[1] = {9, 10};
-  snake[2] = {8, 10};
-  
-  // Default direction: Right
-  dirX = 1; 
-  dirY = 0;
-  
-  gameOver = false;
-  spawnFood();
+void SnakeApp::start() {
+    u8g2.setContrast(systemContrast);
+    randomSeed(esp_random());
+    resetGame();
 }
 
-void handleSnakeInput(char key) {
-  if (gameOver) {
-    if (key == '5') setupSnake();
-    return;
-  }
+void SnakeApp::stop() {}
+
+void SnakeApp::resetGame() {
+    snakeLen = 3;
+    snake[0] = {10, 10};
+    snake[1] = {9, 10};
+    snake[2] = {8, 10};
   
-  // Directional Input (prevent 180 degree turns)
-  // '2' = UP
-  if (key == '2' && dirY == 0) { dirX = 0; dirY = -1; }
-  // '8' = DOWN
-  if (key == '8' && dirY == 0) { dirX = 0; dirY = 1; }
-  // '4' = LEFT
-  if (key == '4' && dirX == 0) { dirX = -1; dirY = 0; }
-  // '6' = RIGHT
-  if (key == '6' && dirX == 0) { dirX = 1; dirY = 0; }
+    dirX = 1; 
+    dirY = 0;
+  
+    gameOver = false;
+    spawnFood();
+    
+    moveInterval = 2; 
+    framesSinceMove = 0;
 }
 
-void updateSnake() {
-  if (gameOver) return;
-  if (millis() - lastMoveTime < gameSpeed) return;
+void SnakeApp::spawnFood() {
+    food.x = random(1, BOARD_W - 1);
+    food.y = random(1, BOARD_H - 1);
+}
+
+void SnakeApp::handleInput(char key) {
+    if (gameOver) {
+        if (key == '5') resetGame();
+        return;
+    }
+    // Directional Input
+    if (key == '2' && dirY == 0) { dirX = 0; dirY = -1; }
+    if (key == '8' && dirY == 0) { dirX = 0; dirY = 1; }
+    if (key == '4' && dirX == 0) { dirX = -1; dirY = 0; }
+    if (key == '6' && dirX == 0) { dirX = 1; dirY = 0; }
+}
+
+void SnakeApp::update() {
+    if (gameOver) return;
+    
+    // Frame-based timing
+    framesSinceMove++;
+    if (framesSinceMove < moveInterval) return;
+    framesSinceMove = 0;
+
+    // Shift Body
+    for (int i = snakeLen - 1; i > 0; i--) {
+        snake[i] = snake[i - 1];
+    }
   
-  lastMoveTime = millis();
+    // Move Head
+    snake[0].x += dirX;
+    snake[0].y += dirY;
 
-  // Move body segments
-  for (int i = snakeLen - 1; i > 0; i--) {
-    snake[i] = snake[i - 1];
-  }
-  
-  // Move head
-  snake[0].x += dirX;
-  snake[0].y += dirY;
-
-  // 1. Wall Collision
-  if (snake[0].x < 0 || snake[0].x >= BOARD_W || snake[0].y < 0 || snake[0].y >= BOARD_H) {
-    gameOver = true;
-  }
-
-  // 2. Self Collision
-  for (int i = 1; i < snakeLen; i++) {
-    if (snake[0].x == snake[i].x && snake[0].y == snake[i].y) {
+    // Collision: Wall
+    if (snake[0].x < 0 || snake[0].x >= BOARD_W || snake[0].y < 0 || snake[0].y >= BOARD_H) {
         gameOver = true;
     }
-  }
 
-  // 3. Eat Food
-  if (snake[0].x == food.x && snake[0].y == food.y) {
-    if (snakeLen < MAX_SNAKE_LEN) snakeLen++;
-    spawnFood();
-  }
+    // Collision: Self
+    for (int i = 1; i < snakeLen; i++) {
+        if (snake[0].x == snake[i].x && snake[0].y == snake[i].y) {
+            gameOver = true;
+        }
+    }
+
+    // Eat Food
+    if (snake[0].x == food.x && snake[0].y == food.y) {
+        if (snakeLen < MAX_SNAKE_LEN) snakeLen++;
+        spawnFood();
+        // Speed up slightly every 5 apples
+        if (snakeLen % 5 == 0 && moveInterval > 2) moveInterval--;
+    }
 }
 
-// --------------------------------------------------------------------------
-// RENDER
-// --------------------------------------------------------------------------
-
-void renderSnake() {
-  if (gameOver) {
-    u8g2.setFont(u8g2_font_ncenB14_tr);
-    u8g2.drawStr(15, 30, "GAME OVER");
-    u8g2.setFont(FONT_SMALL);
-    u8g2.drawStr(25, 50, "PRESS 5 TO RESTART");
-    
-    // Draw Score
-    u8g2.setDrawColor(1);
-    char score[15];
-    sprintf(score, "Score: %d", snakeLen - 3);
-    u8g2.drawStr(40, 60, score);
-    return;
-  }
-
-  // Draw Food
-  u8g2.drawBox(food.x * SNAKE_BLOCK_SIZE, food.y * SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE - 1, SNAKE_BLOCK_SIZE - 1);
-  
-  // Draw Snake
-  for (int i = 0; i < snakeLen; i++) {
-    if (i == 0) {
-        // Head is a Frame (Hollow)
-        u8g2.drawFrame(snake[i].x * SNAKE_BLOCK_SIZE, snake[i].y * SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE);
-    } else {
-        // Body is a Box (Filled)
-        u8g2.drawBox(snake[i].x * SNAKE_BLOCK_SIZE, snake[i].y * SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE - 1, SNAKE_BLOCK_SIZE - 1);
+void SnakeApp::render() {
+    if (gameOver) {
+        // Standardized Game Over Screen
+        u8g2.setFont(u8g2_font_ncenB12_tr);
+        u8g2.drawStr(8, 30, "GAME OVER");
+        
+        u8g2.setFont(FONT_SMALL);
+        u8g2.drawStr(25, 50, "PRESS 5 TO RESTART");
+        
+        char score[15];
+        sprintf(score, "Score: %d", snakeLen - 3);
+        u8g2.drawStr(40, 60, score);
+        return;
     }
-  }
+
+    u8g2.drawFrame(0, 0, 128, 64);
+
+    // Draw Food
+    u8g2.drawBox(food.x * SNAKE_BLOCK_SIZE, food.y * SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE - 1, SNAKE_BLOCK_SIZE - 1);
+  
+    // Draw Snake
+    for (int i = 0; i < snakeLen; i++) {
+        if (i == 0) {
+            u8g2.drawFrame(snake[i].x * SNAKE_BLOCK_SIZE, snake[i].y * SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE);
+        } else {
+            u8g2.drawBox(snake[i].x * SNAKE_BLOCK_SIZE, snake[i].y * SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE - 1, SNAKE_BLOCK_SIZE - 1);
+        }
+    }
+}
+
+--- Start of ./src/apps/stopwatch.cpp ---
+
+// [Revision: v1.0] [Path: src/apps/stopwatch.cpp] [Date: 2025-12-10]
+// Description: Stopwatch logic.
+// Controls: [5] Toggle Start/Stop, [0] Reset (when stopped).
+
+#include "stopwatch.h"
+
+StopwatchApp::StopwatchApp() {
+    isRunning = false;
+    accumulatedTime = 0;
+    startTime = 0;
+}
+
+void StopwatchApp::start() {
+    u8g2.setContrast(systemContrast);
+    // Note: We do NOT reset time here. This allows switching apps 
+    // while the stopwatch continues running in the background.
+}
+
+void StopwatchApp::stop() {
+    // No cleanup needed. State is preserved.
+}
+
+unsigned long StopwatchApp::getTotalTime() {
+    if (isRunning) {
+        // Current time = Previously stored time + (Now - Start timestamp)
+        return accumulatedTime + (millis() - startTime);
+    } else {
+        return accumulatedTime;
+    }
+}
+
+void StopwatchApp::update() {
+    // No physics to update. Time is calculated dynamically in render().
+}
+
+void StopwatchApp::handleInput(char key) {
+    // 5 = PAUSE / RESUME
+    if (key == '5') {
+        if (isRunning) {
+            // PAUSE: Save the elapsed time to the accumulator
+            accumulatedTime += (millis() - startTime);
+            isRunning = false;
+        } else {
+            // RESUME: Set new start timestamp
+            startTime = millis();
+            isRunning = true;
+        }
+    }
+    
+    // 0 = RESET (Only allowed when paused)
+    if (key == '0' && !isRunning) {
+        accumulatedTime = 0;
+    }
+}
+
+void StopwatchApp::render() {
+    u8g2.setFont(FONT_SMALL);
+    u8g2.drawStr(2, 8, "STOPWATCH");
+    u8g2.drawHLine(0, 10, 128);
+    
+    // 1. Calculate Time Components
+    unsigned long totalMillis = getTotalTime();
+    unsigned long totalSeconds = totalMillis / 1000;
+    
+    unsigned long hours = totalSeconds / 3600;
+    unsigned long minutes = (totalSeconds % 3600) / 60;
+    unsigned long seconds = totalSeconds % 60;
+    
+    // 2. Format String (HH:MM:SS)
+    char buf[16];
+    sprintf(buf, "%02lu:%02lu:%02lu", hours, minutes, seconds);
+    
+    // 3. Draw Large Time
+    // Using B14 font to ensure "00:00:00" fits on 128px screen
+    u8g2.setFont(u8g2_font_ncenB14_tr); 
+    int width = u8g2.getStrWidth(buf);
+    u8g2.drawStr((128 - width) / 2, 40, buf); 
+    
+    // 4. Draw Controls
+    u8g2.setFont(u8g2_font_micro_tr); // Tiny font for hints
+    if (isRunning) {
+        u8g2.drawStr(40, 60, "[5] PAUSE");
+    } else {
+        u8g2.drawStr(15, 60, "[5] RESUME   [0] RESET");
+    }
 }
 
 --- Start of ./src/apps/t9_editor.cpp ---
 
-// [Revision: v1.0] [Path: src/apps/t9_editor.cpp] [Date: 2025-12-09]
-// Description: Rendering logic for the T9 Editor application.
+// [Revision: v4.1] [Path: src/apps/t9_editor.cpp] [Date: 2025-12-10]
+// Description: Fixed cursor ghosting/hiding, navigation alignment, and exit logic.
 
 #include "t9_editor.h"
 
-void renderT9Editor() {
-  // 1. Draw Header
-  u8g2.drawHLine(0, 10, 128);
-  u8g2.setFont(FONT_SMALL); 
-  u8g2.drawUTF8(2, 8, "T9 EDITOR v1.5");
-  
-  // 2. Setup Text Position
-  u8g2.setFont(u8g2_font_6x13_t_cyrillic); // Larger font for main text
-  int x = 2; 
-  int y = 25;
-  
-  // 3. Draw Committed Text
-  u8g2.drawUTF8(x, y, engine.textBuffer.c_str());
-  
-  // 4. Draw Pending Character (Candidate)
-  if (engine.pendingCommit) {
-    String pChar = engine.getCurrentChar();
+const char* HELP_TEXT = 
+    "CONTROLS:\n"
+    "2-9: Type\n"
+    "#: Space\n"
+    "*: Shift\n"
+    "Z: Newline\n"
+    "M: Backspace\n"
+    "\n"
+    "NAV:\n"
+    "A/X: Left/Right\n"
+    "B/Y: Up/Down\n"
+    "\n"
+    "SYSTEM:\n"
+    "C: Help\n"
+    "D: Exit\n";
+
+T9EditorApp::T9EditorApp() {
+    scrollOffset = 0;
+    currentState = STATE_EDITING;
+    fileName = "Unnamed"; // Default as requested
+    helpScrollY = 0;
+    exitSelection = false;
+    exitRequested = false;
+}
+
+void T9EditorApp::start() {
+    u8g2.setContrast(systemContrast);
+    currentState = STATE_EDITING;
+    exitRequested = false;
+    recalculateLayout();
+}
+
+void T9EditorApp::stop() {
+    visualLines.clear();
+}
+
+void T9EditorApp::handleInput(char key) {
+    // --- 1. EXIT POPUP HANDLING ---
+    if (currentState == STATE_EXIT_CONFIRM) {
+        if (key == '4') exitSelection = true;  // YES
+        if (key == '6') exitSelection = false; // NO
+        if (key == '5') { // CONFIRM
+            if (exitSelection) {
+                exitRequested = true; // Signal main loop to switch app
+            }
+            currentState = STATE_EDITING; 
+        }
+        return; 
+    }
+
+    // --- 2. HELP POPUP HANDLING ---
+    if (currentState == STATE_HELP) {
+        if (key == 'C') currentState = STATE_EDITING; 
+        if (key == '2') helpScrollY += 5; 
+        if (key == '8') helpScrollY -= 5; 
+        if (helpScrollY > 0) helpScrollY = 0; 
+        return;
+    }
+
+    // --- 3. EDITOR HANDLING ---
+    if (key == 'C') {
+        currentState = STATE_HELP;
+        helpScrollY = 0;
+        return;
+    }
     
-    // Calculate position after existing text
-    int width = u8g2.getUTF8Width(engine.textBuffer.c_str());
+    if (key == 'D') {
+        currentState = STATE_EXIT_CONFIRM;
+        exitSelection = false; // Default No
+        return;
+    }
+
+    if (key == 'A') { engine.moveCursor(-1); return; }
+    if (key == 'X') { engine.moveCursor(1); return; }
+    if (key == 'B') { moveCursorVertically(-1); return; }
+    if (key == 'Y') { moveCursorVertically(1); return; }
+
+    engine.handleInput(key);
+}
+
+void T9EditorApp::moveCursorVertically(int dir) {
+    if (engine.pendingCommit) engine.commit();
+    recalculateLayout(); 
     
-    // Draw the candidate character
-    u8g2.drawUTF8(x + width, y, pChar.c_str());
+    // 1. Find cursor line
+    int currentLineIdx = -1;
+    int cursorRelPos = 0;
     
-    // Draw Underline for candidate
-    u8g2.drawHLine(x + width, y+2, u8g2.getUTF8Width(pChar.c_str()));
+    for(int i=0; i<visualLines.size(); i++) {
+        if (visualLines[i].hasCursor) {
+            currentLineIdx = i;
+            cursorRelPos = engine.cursorPos - visualLines[i].byteStartIndex;
+            break;
+        }
+    }
+
+    if (currentLineIdx == -1) return;
+
+    // 2. Target Line
+    int targetLineIdx = currentLineIdx + dir;
+    if (targetLineIdx < 0) targetLineIdx = 0;
+    if (targetLineIdx >= visualLines.size()) targetLineIdx = visualLines.size() - 1;
     
-    // Draw Timeout Progress Bar
-    long timeLeft = MULTITAP_TIMEOUT - (millis() - engine.getLastPressTime());
-    int barWidth = map(timeLeft, 0, MULTITAP_TIMEOUT, 0, 10);
-    // Clamp bar width to avoid visual artifacts if time slightly negative
-    if (barWidth < 0) barWidth = 0; 
-    u8g2.drawHLine(x + width, y+4, barWidth);
-  }
-  
-  // 5. Draw Blinking Cursor (only when not typing a character)
-  if (!engine.pendingCommit && (millis() / CURSOR_BLINK_RATE) % 2) {
-    int width = u8g2.getUTF8Width(engine.textBuffer.c_str());
-    u8g2.drawVLine(x + width + 1, y - 10, 12);
-  }
+    if (targetLineIdx == currentLineIdx) return;
+
+    // 3. Map Offset
+    VisualLine& target = visualLines[targetLineIdx];
+    int newRelPos = cursorRelPos;
+    if (newRelPos > target.byteLength) newRelPos = target.byteLength;
+    
+    // 4. Align to UTF-8 Boundary (Fixes weird navigation)
+    int tentativePos = target.byteStartIndex + newRelPos;
+    
+    // Safety clamp
+    if (tentativePos > engine.textBuffer.length()) tentativePos = engine.textBuffer.length();
+    
+    // Backtrack if we landed in the middle of a multibyte sequence (0b10xxxxxx)
+    while (tentativePos > 0 && (engine.textBuffer[tentativePos] & 0xC0) == 0x80) {
+        tentativePos--;
+    }
+    
+    engine.setCursor(tentativePos);
+}
+
+void T9EditorApp::update() {
+    if (currentState == STATE_EDITING) {
+        engine.update();
+        
+        String currentCandidate = engine.pendingCommit ? engine.getCurrentChar() : "";
+        if (engine.textBuffer != lastProcessedText || 
+            engine.pendingCommit != lastPendingState ||
+            currentCandidate != lastCandidate ||
+            engine.cursorPos != lastCursorPos) {
+            
+            recalculateLayout();
+            
+            lastProcessedText = engine.textBuffer;
+            lastPendingState = engine.pendingCommit;
+            lastCandidate = currentCandidate;
+            lastCursorPos = engine.cursorPos;
+        }
+    }
+}
+
+void T9EditorApp::recalculateLayout() {
+    visualLines.clear();
+
+    String fullText = engine.textBuffer;
+    String displayText = fullText;
+    if (engine.pendingCommit) {
+        String c = engine.getCurrentChar();
+        displayText = fullText.substring(0, engine.cursorPos) + c + fullText.substring(engine.cursorPos);
+    }
+
+    u8g2.setFont(u8g2_font_6x13_t_cyrillic);
+
+    int currentLogicalLine = 1;
+    int start = 0;
+    
+    while (start <= displayText.length()) {
+        int end = displayText.indexOf('\n', start);
+        if (end == -1) end = displayText.length();
+
+        String segment = displayText.substring(start, end);
+        int segmentLen = segment.length();
+        
+        if (segmentLen == 0) {
+             // Empty line case
+             VisualLine vl;
+             vl.content = "";
+             vl.logicalLineNum = currentLogicalLine;
+             vl.byteStartIndex = start;
+             vl.byteLength = 0;
+             vl.hasCursor = (engine.cursorPos == start);
+             visualLines.push_back(vl);
+        } else {
+            int segStart = 0;
+            while (segStart < segmentLen) {
+                int fitLen = 0;
+                while (segStart + fitLen < segmentLen) {
+                    String sub = segment.substring(segStart, segStart + fitLen + 1);
+                    if (u8g2.getUTF8Width(sub.c_str()) > TEXT_AREA_WIDTH) break;
+                    fitLen++;
+                }
+                if (fitLen == 0 && segStart < segmentLen) fitLen = 1;
+
+                VisualLine vl;
+                vl.content = segment.substring(segStart, segStart + fitLen);
+                vl.logicalLineNum = (segStart == 0) ? currentLogicalLine : -1;
+                vl.byteStartIndex = start + segStart;
+                vl.byteLength = fitLen;
+                
+                // --- FIXED CURSOR LOGIC ---
+                // Prevents double cursors on wrap and invisible cursors at newlines.
+                int absStart = start + segStart;
+                int absEnd = absStart + fitLen;
+                bool isSegmentEnd = (segStart + fitLen == segmentLen);
+
+                // Normal Case: Cursor inside the line
+                if (engine.cursorPos >= absStart && engine.cursorPos < absEnd) {
+                    vl.hasCursor = true;
+                }
+                // Wrap Case: Cursor at end of wrapped line belongs to NEXT line, so we ignore it here.
+                // Newline/EOF Case: Cursor at very end of segment belongs to THIS line.
+                else if (isSegmentEnd && engine.cursorPos == absEnd) {
+                    vl.hasCursor = true;
+                } else {
+                    vl.hasCursor = false;
+                }
+                
+                visualLines.push_back(vl);
+                segStart += fitLen;
+            }
+        }
+        start = end + 1;
+        currentLogicalLine++;
+    }
+    
+    // Auto-Scroll
+    int cursorLineIndex = 0;
+    for(int i=0; i<visualLines.size(); i++) {
+        if (visualLines[i].hasCursor) {
+            cursorLineIndex = i;
+            break;
+        }
+    }
+    if (cursorLineIndex < scrollOffset) scrollOffset = cursorLineIndex;
+    else if (cursorLineIndex >= scrollOffset + VISIBLE_LINES) scrollOffset = cursorLineIndex - VISIBLE_LINES + 1;
+}
+
+void T9EditorApp::renderHeader() {
+    u8g2.setFont(FONT_SMALL);
+    u8g2.drawBox(0, 0, 128, 11);
+    u8g2.setDrawColor(0);
+    
+    String dispName = fileName;
+    if (dispName.length() > 10) dispName = dispName.substring(0, 9) + "~";
+    u8g2.drawStr(2, 9, dispName.c_str());
+    
+    u8g2.drawStr(80, 9, "C-HELP");
+    u8g2.setDrawColor(1);
+}
+
+void T9EditorApp::renderHelpPopup() {
+    u8g2.setDrawColor(0);
+    u8g2.drawBox(10, 10, 108, 44);
+    u8g2.setDrawColor(1);
+    u8g2.drawFrame(10, 10, 108, 44);
+    
+    int x = 14;
+    int y = 20 + helpScrollY;
+    int lineH = 9;
+    String h = HELP_TEXT;
+    int start = 0;
+    while(start < h.length()) {
+        int end = h.indexOf('\n', start);
+        if (end == -1) end = h.length();
+        String line = h.substring(start, end);
+        
+        if (y > 10 && y < 54) {
+             u8g2.drawStr(x, y, line.c_str());
+        }
+        y += lineH;
+        start = end + 1;
+    }
+}
+
+void T9EditorApp::renderExitPopup() {
+    u8g2.setDrawColor(0);
+    u8g2.drawBox(20, 15, 88, 34);
+    u8g2.setDrawColor(1);
+    u8g2.drawFrame(20, 15, 88, 34);
+    
+    u8g2.setFont(FONT_SMALL);
+    u8g2.drawStr(36, 26, "EXIT FILE?");
+    
+    if (exitSelection) {
+        u8g2.drawBox(25, 32, 35, 12); 
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(32, 41, "YES");
+        u8g2.setDrawColor(1);
+        u8g2.drawStr(75, 41, "NO");
+    } else {
+        u8g2.drawBox(68, 32, 30, 12); 
+        u8g2.drawStr(32, 41, "YES");
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(75, 41, "NO");
+        u8g2.setDrawColor(1);
+    }
+}
+
+void T9EditorApp::render() {
+    renderHeader();
+
+    if (currentState == STATE_HELP) {
+        renderHelpPopup();
+        return;
+    }
+    
+    if (currentState == STATE_EXIT_CONFIRM) {
+        renderExitPopup();
+        return; 
+    }
+
+    u8g2.drawVLine(GUTTER_WIDTH, 12, 52);
+    u8g2.setFont(u8g2_font_6x13_t_cyrillic); 
+    
+    int yStart = HEADER_HEIGHT + LINE_HEIGHT; 
+    
+    for(int i=0; i<VISIBLE_LINES; i++) {
+        int idx = scrollOffset + i;
+        if (idx >= visualLines.size()) break;
+
+        VisualLine& vl = visualLines[idx];
+        int y = yStart + (i * LINE_HEIGHT);
+
+        if (vl.logicalLineNum != -1) {
+            u8g2.setFont(u8g2_font_micro_tr); 
+            u8g2.setCursor(1, y - 2);
+            u8g2.print(vl.logicalLineNum);
+            u8g2.setFont(u8g2_font_6x13_t_cyrillic); 
+        }
+
+        u8g2.drawUTF8(GUTTER_WIDTH + 2, y, vl.content.c_str());
+
+        if (vl.hasCursor) {
+            int localCursorIdx = engine.cursorPos - vl.byteStartIndex;
+            if (localCursorIdx < 0) localCursorIdx = 0;
+            if (localCursorIdx > vl.content.length()) localCursorIdx = vl.content.length();
+            
+            String preCursor = vl.content.substring(0, localCursorIdx);
+            int cursorX = GUTTER_WIDTH + 2 + u8g2.getUTF8Width(preCursor.c_str());
+            
+            if (engine.pendingCommit) {
+                String c = engine.getCurrentChar();
+                int charW = u8g2.getUTF8Width(c.c_str());
+                u8g2.drawHLine(cursorX, y+2, charW);
+            } else {
+                if ((millis() / CURSOR_BLINK_RATE) % 2) {
+                    u8g2.drawVLine(cursorX, y - 10, 10);
+                }
+            }
+        }
+    }
 }
 
 --- Start of ./src/hal.cpp ---
 
-// [Revision: v1.0] [Path: src/hal.cpp] [Date: 2025-12-09]
-// Description: Implementation of hardware initialization, display setup, and matrix scanning logic.
+// [Revision: v2.0] [Path: src/hal.cpp] [Date: 2025-12-10]
+// Description: Added systemContrast definition and initialization.
 
 #include "hal.h"
 
@@ -338,22 +1138,19 @@ void renderT9Editor() {
 // DISPLAY OBJECTS
 // --------------------------------------------------------------------------
 
-// Initialize ST7565 Display with Hardware SPI
-// Pins: Clock=SCK, Data=MOSI (Hardware default), CS, DC, RST
 U8G2_ST7565_ERC12864_F_4W_HW_SPI u8g2(U8G2_R0, PIN_CS, PIN_DC, PIN_RST);
-
-// Define the shared font here to ensure single storage in Flash
 const uint8_t* FONT_SMALL = u8g2_font_5x7_t_cyrillic;
+
+// Global Settings
+int systemContrast = DEFAULT_CONTRAST;
 
 // --------------------------------------------------------------------------
 // INPUT MATRIX CONFIG
 // --------------------------------------------------------------------------
 
-// Pin Definitions
 byte rowPins[ROWS] = {42, 41, 40, 39};
 byte colPins[COLS] = {1, 2, 6, 7, 15}; 
 
-// Key Character Map
 char keyMap[ROWS][COLS] = {
   {'*','0','#','D', 'M'}, 
   {'7','8','9','C', 'Z'}, 
@@ -361,11 +1158,8 @@ char keyMap[ROWS][COLS] = {
   {'1','2','3','A', 'X'}  
 };
 
-// Scanning State
 char activeKeys[MAX_PRESSED_KEYS];
 int activeKeyCount = 0;
-
-// Previous frame state for edge detection
 char prevActiveKeys[MAX_PRESSED_KEYS];
 int prevKeyCount = 0;
 
@@ -374,22 +1168,14 @@ int prevKeyCount = 0;
 // --------------------------------------------------------------------------
 
 void setupHardware() {
-  // Initialize Row Pins (Inputs with Pullup)
-  for(int i=0; i<ROWS; i++) {
-      pinMode(rowPins[i], INPUT_PULLUP);
-  }
+  for(int i=0; i<ROWS; i++) pinMode(rowPins[i], INPUT_PULLUP);
+  for(int i=0; i<COLS; i++) pinMode(colPins[i], INPUT);
 
-  // Initialize Col Pins (Inputs - High Z state initially)
-  for(int i=0; i<COLS; i++) {
-      pinMode(colPins[i], INPUT);
-  }
-
-  // Initialize Display
   u8g2.begin();
-  u8g2.setContrast(0); // Start with neutral contrast
-  u8g2.setFontMode(1); // Transparent font background
+  u8g2.setContrast(systemContrast); // Apply global default
+  u8g2.setFontMode(1);
   u8g2.setBitmapMode(1);
-  u8g2.enableUTF8Print(); // Enable Cyrillic support
+  u8g2.enableUTF8Print();
 }
 
 // --------------------------------------------------------------------------
@@ -397,44 +1183,27 @@ void setupHardware() {
 // --------------------------------------------------------------------------
 
 void scanMatrix() {
-  // 1. Archive current state to previous state
   prevKeyCount = activeKeyCount;
   memcpy(prevActiveKeys, activeKeys, sizeof(activeKeys));
-  
-  // 2. Reset current counter
   activeKeyCount = 0;
 
-  // 3. Scan Columns
   for (int c = 0; c < COLS; c++) {
-    // Drive current column LOW
     pinMode(colPins[c], OUTPUT);
     digitalWrite(colPins[c], LOW); 
-    
-    // Short delay for signal settling
     delayMicroseconds(50);
 
-    // Check Rows
     for (int r = 0; r < ROWS; r++) {
-      // If Row is LOW, the switch is closed
       if (digitalRead(rowPins[r]) == LOW) {
         if (activeKeyCount < MAX_PRESSED_KEYS) {
            activeKeys[activeKeyCount++] = keyMap[r][c];
         }
       }
     }
-    
-    // Return column to High-Z (Input)
     pinMode(colPins[c], INPUT);
   }
 }
 
-// --------------------------------------------------------------------------
-// INPUT UTILITIES
-// --------------------------------------------------------------------------
-
-// Returns true only on the specific frame a key is first pressed
 bool isJustPressed(char key) {
-  // 1. Verify key is currently held
   bool currentlyPressed = false;
   for(int i=0; i<activeKeyCount; i++) {
     if(activeKeys[i] == key) { 
@@ -442,153 +1211,132 @@ bool isJustPressed(char key) {
         break; 
     }
   }
-  
   if (!currentlyPressed) return false;
 
-  // 2. Verify key was NOT held in previous frame
   for(int i=0; i<prevKeyCount; i++) {
     if(prevActiveKeys[i] == key) return false; 
   }
-  
   return true;
 }
 
 --- Start of ./src/main.cpp ---
 
-// [Revision: v1.0] [Path: src/main.cpp] [Date: 2025-12-09]
-// Description: Main entry point. Manages the main run loop, system mode switching, and event dispatching.
+// [Revision: v2.6] [Path: src/main.cpp] [Date: 2025-12-10]
+// Description: Added handling for app exit requests (fixes T9 Editor exit bug).
 
 #include <Arduino.h>
 #include "config.h"
 #include "hal.h"
-#include "t9_engine.h"
 
 // App Modules
 #include "apps/t9_editor.h"
 #include "apps/key_tester.h"
 #include "apps/snake.h"
 #include "apps/gfx_test.h"
+#include "apps/menu.h"
+#include "apps/asteroids.h"
+#include "apps/stopwatch.h"
 
 // --------------------------------------------------------------------------
 // SYSTEM STATE
 // --------------------------------------------------------------------------
 
-SystemMode currentMode = MODE_T9_EDITOR;
+T9EditorApp appT9Editor;
+KeyTesterApp appKeyTester;
+SnakeApp appSnake;
+GfxTestApp appGfxTest;
+MenuApp appMenu;
+AsteroidsApp appAsteroids;
+StopwatchApp appStopwatch;
 
-// Store the last pressed key for the Key Tester app
-char lastTestKey = ' ';
+App* currentApp = nullptr;
 
-// --------------------------------------------------------------------------
-// MAIN SETUP
-// --------------------------------------------------------------------------
+// Timing Control
+unsigned long lastFrameTime = 0;
+
+void switchApp(App* newApp) {
+  if (currentApp) currentApp->stop();
+  currentApp = newApp;
+  if (currentApp) currentApp->start();
+}
 
 void setup() {
   Serial.begin(115200);
-  
-  // 1. Initialize Hardware (Display & Matrix)
   setupHardware();
-  
-  // 2. Initialize Apps
-  setupTester();
-  setupSnake(); 
-  
-  // 3. Initial State
-  u8g2.setContrast(0);
+  switchApp(&appMenu);
 }
 
-// --------------------------------------------------------------------------
-// MAIN LOOP
-// --------------------------------------------------------------------------
-
 void loop() {
-  // 1. HARDWARE SCAN
-  // Must be called once per frame to update key states
-  scanMatrix();
+  unsigned long now = millis();
+  
+  // Enforce 60 FPS
+  if (now - lastFrameTime >= FRAME_DELAY_MS) {
+      lastFrameTime = now;
 
-  // 2. EVENT HANDLING
-  for(int i=0; i<activeKeyCount; i++) {
-    char key = activeKeys[i];
+      // 1. HARDWARE SCAN
+      scanMatrix();
     
-    // Only trigger actions on the *first* frame of a press
-    if (isJustPressed(key)) {
+      // 2. EVENT HANDLING
+      for(int i=0; i<activeKeyCount; i++) {
+        char key = activeKeys[i];
         
-        // --- GLOBAL APP SWITCHING ---
-        // X = T9 Editor
-        // Y = Key Tester
-        // A = Snake
-        // B = GFX Test
-        
-        if (key == 'X') {
-          currentMode = MODE_T9_EDITOR;
-          u8g2.setContrast(0); // Reset contrast in case we came from GFX Test
-          continue;
-        }
-        if (key == 'Y') {
-          currentMode = MODE_KEY_TESTER;
-          u8g2.setContrast(0);
-          continue; 
-        }
-        if (key == 'A') {
-          currentMode = MODE_SNAKE;
-          setupSnake(); // Reset game on entry
-          u8g2.setContrast(0);
-          continue;
-        }
-        if (key == 'B') {
-          currentMode = MODE_GFX_TEST;
-          // Note: GFX Test handles its own contrast
-          continue;
-        }
-        
-        // --- APP INPUT DELEGATION ---
-        switch (currentMode) {
-            case MODE_T9_EDITOR:
-                engine.handleInput(key);
-                break;
-            case MODE_KEY_TESTER:
-                lastTestKey = key;
-                addToTesterHistory(key);
-                break;
-            case MODE_SNAKE:
-                handleSnakeInput(key);
-                break;
-            case MODE_GFX_TEST:
-                // GFX Test is passive / auto-running
-                break;
-        }
-    }
-  }
+        if (isJustPressed(key)) {
+            // GLOBAL HOME KEY EXCEPTION
+            if (key == 'D') {
+                 // If we are in T9 Editor, let the app handle it (for popup)
+                 if (currentApp == &appT9Editor) {
+                     currentApp->handleInput(key);
+                     continue;
+                 }
+                 
+                 // Otherwise, go to Menu
+                 if (currentApp != &appMenu) switchApp(&appMenu);
+                 continue;
+            }
 
-  // 3. LOGIC UPDATE
-  // Handle continuous updates (timers, physics, etc.)
-  if (currentMode == MODE_T9_EDITOR) engine.update();
-  if (currentMode == MODE_SNAKE) updateSnake();
+            // REGULAR APP INPUT
+            if (currentApp) {
+                currentApp->handleInput(key);
+            }
+        }
+      } 
+    
+      // 3. LOGIC UPDATE
+      if (currentApp) {
+          currentApp->update();
 
-  // 4. RENDER
-  u8g2.clearBuffer();
-  
-  switch (currentMode) {
-      case MODE_T9_EDITOR:
-          renderT9Editor();
-          break;
-      case MODE_KEY_TESTER:
-          renderKeyTester(lastTestKey, activeKeys, activeKeyCount);
-          break;
-      case MODE_SNAKE:
-          renderSnake();
-          break;
-      case MODE_GFX_TEST:
-          renderGfxTest();
-          break;
+          // Check for T9 Editor Exit Request
+          if (currentApp == &appT9Editor && appT9Editor.exitRequested) {
+              switchApp(&appMenu);
+          }
+          
+          // Menu Switching Logic
+          if (currentApp == &appMenu) {
+              int req = appMenu.getPendingSwitch();
+              if (req != -1) {
+                  switch(req) {
+                      case 0: switchApp(&appT9Editor); break;
+                      case 1: switchApp(&appKeyTester); break;
+                      case 2: switchApp(&appSnake); break;
+                      case 3: switchApp(&appGfxTest); break;
+                      case 4: switchApp(&appAsteroids); break; 
+                      case 5: switchApp(&appStopwatch); break;
+                  }
+              }
+          }
+      }
+    
+      // 4. RENDER
+      u8g2.clearBuffer();
+      if (currentApp) currentApp->render();
+      u8g2.sendBuffer();
   }
-  
-  u8g2.sendBuffer();
 }
 
 --- Start of ./src/t9_engine.cpp ---
 
-// [Revision: v1.0] [Path: src/t9_engine.cpp] [Date: 2025-12-09]
-// Description: Implementation of T9 multi-tap logic with UTF-8 support.
+// [Revision: v2.1] [Path: src/t9_engine.cpp] [Date: 2025-12-10]
+// Description: Implemented cursor-aware insertion and deletion.
 
 #include "t9_engine.h"
 
@@ -621,19 +1369,16 @@ int T9Engine::getUtf8Length(const char* str) {
   int len = 0;
   int i = 0;
   while(str[i] != 0) {
-    // 0xC0 mask checks for start of multibyte sequence
     if ((str[i] & 0xC0) != 0x80) len++;
     i++;
   }
   return len;
 }
 
-// Extract specific character at visual index from UTF-8 string
 String T9Engine::getUtf8CharAtIndex(const char* str, int index) {
   int count = 0;
   int i = 0;
   int start = 0;
-  
   while(str[i] != 0) {
     if ((str[i] & 0xC0) != 0x80) { 
         if (count == index) start = i;
@@ -646,7 +1391,6 @@ String T9Engine::getUtf8CharAtIndex(const char* str, int index) {
     }
     i++;
   }
-  // Handle last character case
   if (count == index + 1) {
       String res = "";
       for(int k=start; k<i; k++) res += str[k];
@@ -654,10 +1398,6 @@ String T9Engine::getUtf8CharAtIndex(const char* str, int index) {
   }
   return "";
 }
-
-// --------------------------------------------------------------------------
-// ENGINE LOGIC
-// --------------------------------------------------------------------------
 
 unsigned long T9Engine::getLastPressTime() { return lastPressTime; }
 
@@ -669,13 +1409,45 @@ String T9Engine::getCurrentChar() {
   String c = getUtf8CharAtIndex(t9Map[mapIndex], cycleIndex);
   
   if (isShifted) {
-      // Basic ASCII upper-casing
       if (c.length() == 1 && c[0] >= 'a' && c[0] <= 'z') {
         c = String((char)(c[0] - 32));
       }
-      // Note: Cyrillic uppercase implementation omitted for brevity
   }
   return c;
+}
+
+void T9Engine::moveCursor(int delta) {
+    if (pendingCommit) commit();
+
+    // Move Forward
+    if (delta > 0) {
+        for(int i=0; i<delta; i++) {
+            if (cursorPos >= textBuffer.length()) break;
+            // Advance one UTF-8 char
+            cursorPos++;
+            while (cursorPos < textBuffer.length() && (textBuffer[cursorPos] & 0xC0) == 0x80) {
+                cursorPos++;
+            }
+        }
+    }
+    // Move Backward
+    else if (delta < 0) {
+        for(int i=0; i < -delta; i++) {
+            if (cursorPos <= 0) break;
+            // Rewind one UTF-8 char
+            cursorPos--;
+            while (cursorPos > 0 && (textBuffer[cursorPos] & 0xC0) == 0x80) {
+                cursorPos--;
+            }
+        }
+    }
+}
+
+void T9Engine::setCursor(int pos) {
+    if (pendingCommit) commit();
+    cursorPos = pos;
+    if (cursorPos < 0) cursorPos = 0;
+    if (cursorPos > textBuffer.length()) cursorPos = textBuffer.length();
 }
 
 void T9Engine::handleInput(char key) {
@@ -685,13 +1457,14 @@ void T9Engine::handleInput(char key) {
   if (key == 'M') { 
     if (pendingCommit) {
         pendingCommit = false;
-    } else if (textBuffer.length() > 0) {
-        // Remove last UTF-8 character
-        while(textBuffer.length() > 0) {
-          char lastByte = textBuffer[textBuffer.length()-1];
-          textBuffer.remove(textBuffer.length() - 1);
-          if ((lastByte & 0xC0) != 0x80) break; 
+    } else if (cursorPos > 0) {
+        // Find start of previous character
+        int prevPos = cursorPos - 1;
+        while (prevPos > 0 && (textBuffer[prevPos] & 0xC0) == 0x80) {
+            prevPos--;
         }
+        textBuffer.remove(prevPos, cursorPos - prevPos);
+        cursorPos = prevPos;
     }
     return;
   }
@@ -699,14 +1472,16 @@ void T9Engine::handleInput(char key) {
   // NEWLINE (Z)
   if (key == 'Z') {
     if (pendingCommit) commit();
-    textBuffer += '\n';
+    textBuffer = textBuffer.substring(0, cursorPos) + "\n" + textBuffer.substring(cursorPos);
+    cursorPos++;
     return;
   }
   
   // SPACE (#)
   if (key == '#') {
       if (pendingCommit) commit();
-      textBuffer += ' ';
+      textBuffer = textBuffer.substring(0, cursorPos) + " " + textBuffer.substring(cursorPos);
+      cursorPos++;
       return;
   }
   
@@ -718,14 +1493,12 @@ void T9Engine::handleInput(char key) {
 
   // NUMERIC KEYS (0-9)
   if (key >= '0' && key <= '9') {
-    // If same key pressed within timeout -> cycle character
     if (pendingCommit && key == pendingKey && (now - lastPressTime < MULTITAP_TIMEOUT)) {
       cycleIndex++;
       int mapLen = getUtf8Length(t9Map[key - '0']);
       if (cycleIndex >= mapLen) cycleIndex = 0; 
       lastPressTime = now;
     } else {
-      // New key pressed -> commit previous and start new cycle
       if (pendingCommit) commit();
       pendingKey = key;
       cycleIndex = 0;
@@ -733,25 +1506,27 @@ void T9Engine::handleInput(char key) {
       lastPressTime = now;
     }
   } else {
-      // Any other key commits current character
       if (pendingCommit) commit();
   }
 }
 
 void T9Engine::update() {
-  // Auto-commit if timeout reached
   if (pendingCommit && (millis() - lastPressTime > MULTITAP_TIMEOUT)) {
     commit();
   }
 }
 
 void T9Engine::commit() {
-  textBuffer += getCurrentChar();
+  String c = getCurrentChar();
+  textBuffer = textBuffer.substring(0, cursorPos) + c + textBuffer.substring(cursorPos);
+  cursorPos += c.length();
+  
   pendingCommit = false;
   cycleIndex = 0;
 }
 
 void T9Engine::reset() {
     textBuffer = "";
+    cursorPos = 0;
     pendingCommit = false;
 }

@@ -1,15 +1,140 @@
+--- Start of ./src/app_interface.h ---
+
+// [Revision: v1.0] [Path: src/app_interface.h] [Date: 2025-12-10]
+// Description: Abstract base class defining the standard interface for all applications.
+
+#ifndef APP_INTERFACE_H
+#define APP_INTERFACE_H
+
+#include "hal.h"
+
+class App {
+  public:
+    virtual ~App() {}
+
+    // Called when the app becomes active
+    virtual void start() = 0;
+
+    // Called when the app is being switched away from
+    virtual void stop() = 0;
+
+    // Main logic loop (physics, timers, etc.)
+    virtual void update() = 0;
+
+    // Drawing logic
+    virtual void render() = 0;
+
+    // Input handling (only called on just-pressed events)
+    virtual void handleInput(char key) = 0;
+};
+
+#endif
+
+--- Start of ./src/apps/asteroids.h ---
+
+// [Revision: v1.0] [Path: src/apps/asteroids.h] [Date: 2025-12-10]
+// Description: Asteroids Arcade Game.
+// features: Vector physics, screen wrapping, collision detection, particle system.
+
+#ifndef APP_ASTEROIDS_H
+#define APP_ASTEROIDS_H
+
+#include "../app_interface.h"
+#include <vector>
+
+struct Vec2 {
+    float x, y;
+};
+
+struct Bullet {
+    Vec2 pos;
+    Vec2 vel;
+    int life;     // Frames remaining
+    bool active;
+};
+
+struct Asteroid {
+    Vec2 pos;
+    Vec2 vel;
+    int size;     // 3=Large, 2=Medium, 1=Small
+    int radius;
+    float seed;   // Random seed for jagged shape generation
+    bool active;
+};
+
+struct Particle {
+    Vec2 pos;
+    Vec2 vel;
+    int life;
+    bool active;
+};
+
+class AsteroidsApp : public App {
+  private:
+    // Game Objects
+    Vec2 shipPos;
+    Vec2 shipVel;
+    float shipAngle; // Radians
+    bool isThrusting;
+    
+    // Object Pools
+    std::vector<Bullet> bullets;
+    std::vector<Asteroid> asteroids;
+    std::vector<Particle> particles;
+
+    // Game State
+    int score;
+    bool gameOver;
+    int level;
+    unsigned long lastShotTime;
+
+    // Helpers
+    void spawnAsteroid(float x, float y, int size);
+    void spawnBullet();
+    void createExplosion(float x, float y, int count);
+    void resetGame();
+    void nextLevel();
+    bool checkCollision(float x1, float y1, float r1, float x2, float y2, float r2);
+    void drawWireframeModel(const float* coords, int numPoints, float x, float y, float angle, float scale);
+
+  public:
+    AsteroidsApp();
+    void start() override;
+    void stop() override;
+    void update() override;
+    void render() override;
+    void handleInput(char key) override;
+};
+
+#endif
+
 --- Start of ./src/apps/gfx_test.h ---
 
-// [Revision: v1.0] [Path: src/apps/gfx_test.h] [Date: 2025-12-09]
-// Description: Header for the Graphics & Hardware Test application.
+// [Revision: v2.1] [Path: src/apps/gfx_test.h] [Date: 2025-12-10]
+// Description: Header for GFX Test. Added timing variables for contrast control.
 
 #ifndef APP_GFX_TEST_H
 #define APP_GFX_TEST_H
 
-#include "../hal.h"
+#include "../app_interface.h"
 
-// Renders the graphics test pattern and cycles hardware contrast automatically.
-void renderGfxTest();
+class GfxTestApp : public App {
+  private:
+    int currentContrast;
+    int contrastDir;
+    
+    // Timing Control
+    unsigned long lastStepTime;
+    int stepInterval; // ms per contrast step
+
+  public:
+    GfxTestApp();
+    void start() override;
+    void stop() override;
+    void update() override;
+    void render() override;
+    void handleInput(char key) override;
+};
 
 #endif
 
@@ -40,70 +165,224 @@ void renderGfxTest();
 
 --- Start of ./src/apps/key_tester.h ---
 
-// [Revision: v1.0] [Path: src/apps/key_tester.h] [Date: 2025-12-09]
-// Description: Header for the Key Matrix Tester application.
+// [Revision: v2.0] [Path: src/apps/key_tester.h] [Date: 2025-12-10]
+// Description: Key Tester Application class definition.
 
 #ifndef APP_KEY_TESTER_H
 #define APP_KEY_TESTER_H
 
-#include "../hal.h"
+#include "../app_interface.h"
 
-// Initialize tester state (clear history)
-void setupTester();
+class KeyTesterApp : public App {
+  private:
+    char lastPressedKey;
+    static const int HISTORY_SIZE = 14;
+    char keyHistory[HISTORY_SIZE + 1];
 
-// Add a key to the scrolling history buffer
-void addToTesterHistory(char c);
+    void addToHistory(char c);
 
-// Render the debug interface showing history, last pressed key, and currently held keys
-void renderKeyTester(char lastKey, char* heldKeys, int count);
+  public:
+    KeyTesterApp(); // Constructor to init buffers
+    void start() override;
+    void stop() override;
+    void update() override;
+    void render() override;
+    void handleInput(char key) override;
+};
+
+#endif
+
+--- Start of ./src/apps/menu.h ---
+
+// [Revision: v2.2] [Path: src/apps/menu.h] [Date: 2025-12-10]
+// Description: Menu Header. Added scroll tracking.
+
+#ifndef APP_MENU_H
+#define APP_MENU_H
+
+#include "../app_interface.h"
+
+class MenuApp : public App {
+  private:
+    static const int ITEM_COUNT = 6;
+    const char* menuItems[ITEM_COUNT] = {
+      "1. T9 Editor",
+      "2. Key Tester",
+      "3. Snake Game",
+      "4. GFX Test",
+      "5. Asteroids",
+      "6. Stopwatch"
+    };
+
+    int selectedIndex;
+    int scrollOffset; // Index of the first visible item
+    int pendingSwitchIndex; 
+
+  public:
+    MenuApp();
+    void start() override;
+    void stop() override;
+    void update() override;
+    void render() override;
+    void handleInput(char key) override;
+    int getPendingSwitch(); 
+};
 
 #endif
 
 --- Start of ./src/apps/snake.h ---
 
-// [Revision: v1.0] [Path: src/apps/snake.h] [Date: 2025-12-09]
-// Description: Header for the Snake Game application.
+// [Revision: v2.1] [Path: src/apps/snake.h] [Date: 2025-12-10]
+// Description: Updated for frame-counter timing.
 
 #ifndef APP_SNAKE_H
 #define APP_SNAKE_H
 
-#include "../hal.h"
+#include "../app_interface.h"
 
-// Initialize game state, reset score, spawn first food
-void setupSnake();
+struct Point { 
+    int x, y;
+};
 
-// Handle directional input (2/4/6/8) and restart (5)
-void handleSnakeInput(char key);
+class SnakeApp : public App {
+  private:
+    static const int MAX_SNAKE_LEN = 100;
+    static const int SNAKE_BLOCK_SIZE = 4;
+    static const int BOARD_W = 128 / SNAKE_BLOCK_SIZE;
+    static const int BOARD_H = 64 / SNAKE_BLOCK_SIZE;
 
-// Main game loop logic (movement, collision, eating)
-void updateSnake();
+    Point snake[MAX_SNAKE_LEN];
+    int snakeLen;
+    int dirX, dirY;
+    Point food;
+    bool gameOver;
+    
+    // New Timing Logic
+    int moveInterval;    // Frames between moves
+    int framesSinceMove; // Counter
 
-// Render game board and game over screen
-void renderSnake();
+    void spawnFood();
+    void resetGame();
+
+  public:
+    SnakeApp();
+    void start() override;
+    void stop() override;
+    void update() override;
+    void render() override;
+    void handleInput(char key) override;
+};
+
+#endif
+
+--- Start of ./src/apps/stopwatch.h ---
+
+// [Revision: v1.0] [Path: src/apps/stopwatch.h] [Date: 2025-12-10]
+// Description: Stopwatch Application. 
+// Features: Independent timekeeping (millis-based), Pause/Resume, Reset.
+
+#ifndef APP_STOPWATCH_H
+#define APP_STOPWATCH_H
+
+#include "../app_interface.h"
+
+class StopwatchApp : public App {
+  private:
+    bool isRunning;
+    unsigned long startTime;       // Time stamp when "Start" was pressed
+    unsigned long accumulatedTime; // Time stored from previous sessions (before pause)
+    
+    // Helper to calculate time to display
+    unsigned long getTotalTime();
+
+  public:
+    StopwatchApp();
+    void start() override;
+    void stop() override;
+    void update() override;
+    void render() override;
+    void handleInput(char key) override;
+};
 
 #endif
 
 --- Start of ./src/apps/t9_editor.h ---
 
-// [Revision: v1.0] [Path: src/apps/t9_editor.h] [Date: 2025-12-09]
-// Description: Header for the T9 Editor Application.
+// [Revision: v4.1] [Path: src/apps/t9_editor.h] [Date: 2025-12-10]
+// Description: Added exitRequested flag and refined cursor logic.
 
 #ifndef APP_T9_EDITOR_H
 #define APP_T9_EDITOR_H
 
-#include "../hal.h"
+#include "../app_interface.h"
 #include "../t9_engine.h"
+#include <vector>
 
-// Renders the T9 text editor interface, including the text buffer,
-// pending character candidate, timeout bar, and cursor.
-void renderT9Editor();
+struct VisualLine {
+    String content;     
+    int logicalLineNum; 
+    bool hasCursor;     
+    int byteStartIndex; // Index in textBuffer where this line starts
+    int byteLength;     // Length of this line in bytes
+};
+
+enum EditorState {
+    STATE_EDITING,
+    STATE_HELP,
+    STATE_EXIT_CONFIRM
+};
+
+class T9EditorApp : public App {
+  private:
+    // Layout State
+    std::vector<VisualLine> visualLines;
+    int scrollOffset;   
+    
+    // Caching
+    String lastProcessedText;
+    bool lastPendingState;
+    String lastCandidate;
+    int lastCursorPos;
+
+    // Config
+    const int LINE_HEIGHT = 13; 
+    const int HEADER_HEIGHT = 12;
+    const int GUTTER_WIDTH = 18;
+    const int TEXT_AREA_WIDTH = 128 - GUTTER_WIDTH - 2; 
+    const int VISIBLE_LINES = (64 - HEADER_HEIGHT) / LINE_HEIGHT;
+
+    // New UI State
+    EditorState currentState;
+    String fileName;
+    int helpScrollY;
+    bool exitSelection; // true=YES, false=NO
+
+    // Internal Helpers
+    void recalculateLayout();
+    void moveCursorVertically(int dir); // -1 Up, +1 Down
+    void renderHeader();
+    void renderHelpPopup();
+    void renderExitPopup();
+
+  public:
+    T9EditorApp();
+    
+    // Communication flag for Main loop
+    bool exitRequested; 
+
+    void start() override;
+    void stop() override;
+    void update() override;
+    void render() override;
+    void handleInput(char key) override;
+};
 
 #endif
 
 --- Start of ./src/config.h ---
 
-// [Revision: v1.0] [Path: src/config.h] [Date: 2025-12-09]
-// Description: Global hardware definitions, timing constants, and system mode enums.
+// [Revision: v2.2] [Path: src/config.h] [Date: 2025-12-10]
+// Description: Global hardware definitions and timing constants.
 
 #ifndef CONFIG_H
 #define CONFIG_H
@@ -114,7 +393,6 @@ void renderT9Editor();
 // HARDWARE PINS (ESP32-S3)
 // --------------------------------------------------------------------------
 
-// Display (ST7565 / ERC12864-4)
 #define PIN_CS  10
 #define PIN_DC  5
 #define PIN_RST 4
@@ -129,29 +407,22 @@ extern byte colPins[COLS];
 extern char keyMap[ROWS][COLS];
 
 // --------------------------------------------------------------------------
-// TIMING CONSTANTS
+// TIMING & CONFIG CONSTANTS
 // --------------------------------------------------------------------------
 
-#define MULTITAP_TIMEOUT 800   // Max time (ms) between presses for T9 cycling
-#define CURSOR_BLINK_RATE 500  // Blinking cursor interval (ms)
+#define PHYSICAL_FPS 10
+#define FRAME_DELAY_MS (1000 / PHYSICAL_FPS)
 
-// --------------------------------------------------------------------------
-// SYSTEM STATES
-// --------------------------------------------------------------------------
-
-enum SystemMode {
-  MODE_T9_EDITOR,
-  MODE_KEY_TESTER,
-  MODE_SNAKE,
-  MODE_GFX_TEST
-};
+#define MULTITAP_TIMEOUT 800   
+#define CURSOR_BLINK_RATE 500
+#define DEFAULT_CONTRAST 0     // Global default contrast (0-255)
 
 #endif
 
 --- Start of ./src/hal.h ---
 
-// [Revision: v1.0] [Path: src/hal.h] [Date: 2025-12-09]
-// Description: Hardware Abstraction Layer declarations for Display and Input Matrix.
+// [Revision: v2.0] [Path: src/hal.h] [Date: 2025-12-10]
+// Description: Added systemContrast external declaration.
 
 #ifndef HAL_H
 #define HAL_H
@@ -164,11 +435,9 @@ enum SystemMode {
 // DISPLAY EXPORTS
 // --------------------------------------------------------------------------
 
-// Main display object (ST7565 via SPI)
 extern U8G2_ST7565_ERC12864_F_4W_HW_SPI u8g2;
-
-// Shared font resource to reduce memory duplication
 extern const uint8_t* FONT_SMALL; 
+extern int systemContrast; // Global system contrast variable
 
 // --------------------------------------------------------------------------
 // INPUT EXPORTS
@@ -176,7 +445,6 @@ extern const uint8_t* FONT_SMALL;
 
 #define MAX_PRESSED_KEYS 6
 
-// Array holding keys currently pressed in this frame
 extern char activeKeys[MAX_PRESSED_KEYS];
 extern int activeKeyCount;
 
@@ -184,16 +452,16 @@ extern int activeKeyCount;
 // CORE FUNCTIONS
 // --------------------------------------------------------------------------
 
-void setupHardware();           // Initialize pins and display
-void scanMatrix();              // Poll the keypad matrix (call every loop)
-bool isJustPressed(char key);   // True if key was not pressed in previous frame
+void setupHardware();           
+void scanMatrix();              
+bool isJustPressed(char key);   
 
 #endif
 
 --- Start of ./src/t9_engine.h ---
 
-// [Revision: v1.0] [Path: src/t9_engine.h] [Date: 2025-12-09]
-// Description: T9 Predictive Text / Multi-tap Engine class declaration.
+// [Revision: v2.1] [Path: src/t9_engine.h] [Date: 2025-12-10]
+// Description: Added Cursor Position support for navigation and insertion.
 
 #ifndef T9_ENGINE_H
 #define T9_ENGINE_H
@@ -204,29 +472,34 @@ bool isJustPressed(char key);   // True if key was not pressed in previous frame
 class T9Engine {
   private:
     // Input State
-    char pendingKey = '\0';          // The number key currently being cycled
-    int cycleIndex = 0;              // Current index in the character map for the key
-    unsigned long lastPressTime = 0; // Timestamp of last press for timeout logic
-    bool isShifted = false;          // Shift/Caps Lock state
+    char pendingKey = '\0';          
+    int cycleIndex = 0;              
+    unsigned long lastPressTime = 0; 
+    bool isShifted = false;          
 
     // UTF-8 Helper Methods
     int getUtf8Length(const char* str);
     String getUtf8CharAtIndex(const char* str, int index);
 
   public:
-    // Editor State (Public for Renderer access)
+    // Editor State
     String textBuffer = "";
-    bool pendingCommit = false; // True if user is currently cycling a character
+    int cursorPos = 0; // Current insertion point (byte index)
+    bool pendingCommit = false; 
 
     // Getters
     unsigned long getLastPressTime();
-    String getCurrentChar(); // Returns the character currently being cycled
+    String getCurrentChar(); 
 
     // Core Logic
-    void handleInput(char key); // Process raw key input
-    void update();              // Call in loop to handle timeout commits
-    void commit();              // Force commit of pending character
-    void reset();               // Clear buffer and state
+    void handleInput(char key); 
+    void update();              
+    void commit();              
+    void reset();               
+    
+    // Navigation Helpers
+    void moveCursor(int delta); // Move by UTF-8 characters
+    void setCursor(int pos);    // Set raw byte index
 };
 
 extern T9Engine engine;

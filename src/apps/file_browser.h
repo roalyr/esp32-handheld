@@ -8,20 +8,16 @@
 #include <vector>
 
 struct FileEntry {
-    String name;      // Filename
-    bool isDir;       // True if directory, false if file
-    bool isParent;    // True if ".." entry
-};
-
-enum StorageType {
-    STORAGE_SPIFFS = 0,
-    STORAGE_SDCARD = 1
+  String name;      // Filename
+  bool isDir;       // True if directory (we'll ignore dirs for SPIFFS-only)
+  bool isParent;    // Reserved (not used)
+  size_t size;      // File size in bytes (used for alternate sorting)
+  unsigned long mtime; // Placeholder for modified time (SPIFFS may not provide)
 };
 
 enum MenuState {
-    MENU_CLOSED = 0,
-    MENU_FILE_CONTEXT = 1,    // Context menu for selected file
-    MENU_FOLDER_OPS = 2       // Folder operations menu
+  MENU_CLOSED = 0,
+  MENU_FILE_CONTEXT = 1    // Context menu for selected file
 };
 
 class FileBrowserApp : public App {
@@ -34,8 +30,7 @@ class FileBrowserApp : public App {
 
     std::vector<FileEntry> fileList;
     String currentPath;
-    StorageType currentStorage;
-    
+
     int selectedIndex;
     int scrollOffset;
     
@@ -43,19 +38,20 @@ class FileBrowserApp : public App {
     int menuSelectedIndex;  // Selection within context menu
     
     bool spiffsAvailable;
-    bool sdAvailable;
+    bool awaitingSaveConfirmation;
+    // Temporary save feedback message (displayed for a short time)
+    String saveMessage;
+    unsigned long saveMessageUntil;
+    
+    enum SortMode { SORT_NAME = 0, SORT_MTIME = 1 };
+    SortMode sortMode;
 
     // Private helper methods
     void scanDirectory(const String& path);
-    void switchStorage(StorageType newStorage);
     String truncateFilename(const String& name, int maxLen);
     void openFileContextMenu();
-    void openFolderMenu();
     void closeMenu();
     void handleFileAction(int actionIndex);
-    void handleFolderAction(int actionIndex);
-    void navigateToParent();
-    void navigateToDirectory(const String& dirName);
 
   public:
     FileBrowserApp();

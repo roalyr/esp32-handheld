@@ -14,6 +14,8 @@
 #include "apps/asteroids.h"
 #include "apps/stopwatch.h"
 #include "apps/file_browser.h"
+#include "apps/yes_no_prompt.h"
+#include "app_transfer.h"
 
 // --------------------------------------------------------------------------
 // SYSTEM STATE
@@ -86,7 +88,16 @@ void loop() {
 
           // Check for T9 Editor Exit Request
           if (currentApp == &appT9Editor && appT9Editor.exitRequested) {
-              switchApp(&appMenu);
+              // If a caller requested the editor for a special action, return there
+              if (appTransferCaller != nullptr) {
+                  App* ret = appTransferCaller;
+                  appTransferCaller = nullptr;
+                  appT9Editor.exitRequested = false;
+                  switchApp(ret);
+              } else {
+                  appT9Editor.exitRequested = false;
+                  switchApp(&appMenu);
+              }
           }
           
           // Menu Switching Logic
@@ -94,13 +105,12 @@ void loop() {
               int req = appMenu.getPendingSwitch();
               if (req != -1) {
                   switch(req) {
-                      case 0: switchApp(&appT9Editor); break;
-                      case 1: switchApp(&appKeyTester); break;
-                      case 2: switchApp(&appSnake); break;
-                      case 3: switchApp(&appGfxTest); break;
-                      case 4: switchApp(&appAsteroids); break; 
-                      case 5: switchApp(&appStopwatch); break;
-                      case 6: switchApp(&appFileBrowser); break;
+                      case 0: switchApp(&appKeyTester); break;
+                      case 1: switchApp(&appSnake); break;
+                      case 2: switchApp(&appGfxTest); break;
+                      case 3: switchApp(&appAsteroids); break; 
+                      case 4: switchApp(&appStopwatch); break;
+                      case 5: switchApp(&appFileBrowser); break;
                   }
               }
           }

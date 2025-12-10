@@ -17,9 +17,8 @@ struct VisualLine {
 };
 
 enum EditorState {
-    STATE_EDITING,
-    STATE_HELP,
-    STATE_EXIT_CONFIRM
+  STATE_EDITING,
+  STATE_HELP
 };
 
 class T9EditorApp : public App {
@@ -35,24 +34,25 @@ class T9EditorApp : public App {
     int lastCursorPos;
 
     // Config
-    const int LINE_HEIGHT = 13; 
+    const int LINE_HEIGHT = 10; 
     const int HEADER_HEIGHT = 12;
-    const int GUTTER_WIDTH = 18;
+    const int GUTTER_WIDTH = 12;
     const int TEXT_AREA_WIDTH = 128 - GUTTER_WIDTH - 2; 
     const int VISIBLE_LINES = (64 - HEADER_HEIGHT) / LINE_HEIGHT;
 
     // New UI State
     EditorState currentState;
+    bool readOnly; // If true, disable typing input and show read-only indicator
     String fileName;
     int helpScrollY;
-    bool exitSelection; // true=YES, false=NO
+    // exitSelection removed: use shared yes/no prompt app instead
 
     // Internal Helpers
     void recalculateLayout();
     void moveCursorVertically(int dir); // -1 Up, +1 Down
     void renderHeader();
     void renderHelpPopup();
-    void renderExitPopup();
+    // exit popup removed in favor of shared yes/no prompt
 
   public:
     T9EditorApp();

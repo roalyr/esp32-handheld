@@ -2,14 +2,17 @@
 // Description: Fixed cursor ghosting/hiding, navigation alignment, and exit logic.
 
 #include "t9_editor.h"
+#include "../app_transfer.h"
+#include "../app_control.h"
 
-const char* HELP_TEXT = 
+const char* HELP_TEXT =
     "CONTROLS:\n"
     "2-9: Type\n"
     "#: Space\n"
     "*: Shift\n"
     "Z: Newline\n"
     "M: Backspace\n"
+    "5: Confirm (when prompted)\n"
     "\n"
     "NAV:\n"
     "A/X: Left/Right\n"
@@ -24,34 +27,47 @@ T9EditorApp::T9EditorApp() {
     currentState = STATE_EDITING;
     fileName = "Unnamed"; // Default as requested
     helpScrollY = 0;
-    exitSelection = false;
     exitRequested = false;
+    readOnly = false;
 }
 
 void T9EditorApp::start() {
     u8g2.setContrast(systemContrast);
     currentState = STATE_EDITING;
     exitRequested = false;
+    // If invoked as a transfer target, preload buffer or filename
+    readOnly = false;
+    if (appTransferAction == ACTION_EDIT_FILE) {
+        // Editing file contents (read-write)
+        engine.textBuffer = appTransferString;
+        fileName = appTransferPath;
+        readOnly = false;
+    } else if (appTransferAction == ACTION_VIEW_FILE) {
+        // View-only mode: load contents but disable typing
+        engine.textBuffer = appTransferString;
+        fileName = appTransferPath;
+        readOnly = true;
+    } else if (appTransferAction == ACTION_CREATE_FILE) {
+        // Create new file: start with empty buffer, read-write
+        engine.textBuffer = appTransferString; // likely empty
+        fileName = "New File";
+        readOnly = false;
+    } else if (appTransferAction == ACTION_REQUEST_FILENAME || appTransferAction == ACTION_CREATE_FOLDER || appTransferAction == ACTION_RENAME) {
+        // Editing a single-line name (not used in simplified SPIFFS mode)
+        engine.textBuffer = appTransferString;
+        fileName = "Enter name";
+    }
     recalculateLayout();
 }
 
 void T9EditorApp::stop() {
     visualLines.clear();
+    // Clear the engine buffer when closing the editor (per request)
+    engine.reset();
 }
 
 void T9EditorApp::handleInput(char key) {
-    // --- 1. EXIT POPUP HANDLING ---
-    if (currentState == STATE_EXIT_CONFIRM) {
-        if (key == '4') exitSelection = true;  // YES
-        if (key == '6') exitSelection = false; // NO
-        if (key == '5') { // CONFIRM
-            if (exitSelection) {
-                exitRequested = true; // Signal main loop to switch app
-            }
-            currentState = STATE_EDITING; 
-        }
-        return; 
-    }
+    // Exit confirmation is handled by shared Yes/No prompt app now.
 
     // --- 2. HELP POPUP HANDLING ---
     if (currentState == STATE_HELP) {
@@ -70,8 +86,11 @@ void T9EditorApp::handleInput(char key) {
     }
     
     if (key == 'D') {
-        currentState = STATE_EXIT_CONFIRM;
-        exitSelection = false; // Default No
+        // Signal exit requested. If this editor was opened as a filename/content
+        // transfer target, the caller will be returned to by main loop.
+        // Save buffer to transfer area so the caller can read it.
+        appTransferString = engine.textBuffer;
+        exitRequested = true;
         return;
     }
 
@@ -79,6 +98,11 @@ void T9EditorApp::handleInput(char key) {
     if (key == 'X') { engine.moveCursor(1); return; }
     if (key == 'B') { moveCursorVertically(-1); return; }
     if (key == 'Y') { moveCursorVertically(1); return; }
+
+    // If in read-only mode, ignore typing keys and only allow navigation and exit
+    if (readOnly) {
+        return;
+    }
 
     engine.handleInput(key);
 }
@@ -157,7 +181,7 @@ void T9EditorApp::recalculateLayout() {
         displayText = fullText.substring(0, engine.cursorPos) + c + fullText.substring(engine.cursorPos);
     }
 
-    u8g2.setFont(u8g2_font_6x13_t_cyrillic);
+    u8g2.setFont(u8g2_font_5x8_tr);
 
     int currentLogicalLine = 1;
     int start = 0;
@@ -239,10 +263,16 @@ void T9EditorApp::renderHeader() {
     u8g2.setDrawColor(0);
     
     String dispName = fileName;
-    if (dispName.length() > 10) dispName = dispName.substring(0, 9) + "~";
+    // Reserve space on the right for the RW/RO indicator and C-HELP label
+    if (dispName.length() > 14) dispName = dispName.substring(0, 11) + "...";
     u8g2.drawStr(2, 9, dispName.c_str());
-    
-    u8g2.drawStr(80, 9, "C-HELP");
+
+    // Draw read-only indicator moved right to avoid overlapping long filenames
+    if (readOnly) {
+        u8g2.drawStr(88, 9, "RO");
+    }
+    // Help label further to the right
+    u8g2.drawStr(100, 9, "C-HELP");
     u8g2.setDrawColor(1);
 }
 
@@ -270,29 +300,7 @@ void T9EditorApp::renderHelpPopup() {
     }
 }
 
-void T9EditorApp::renderExitPopup() {
-    u8g2.setDrawColor(0);
-    u8g2.drawBox(20, 15, 88, 34);
-    u8g2.setDrawColor(1);
-    u8g2.drawFrame(20, 15, 88, 34);
-    
-    u8g2.setFont(FONT_SMALL);
-    u8g2.drawStr(36, 26, "EXIT FILE?");
-    
-    if (exitSelection) {
-        u8g2.drawBox(25, 32, 35, 12); 
-        u8g2.setDrawColor(0);
-        u8g2.drawStr(32, 41, "YES");
-        u8g2.setDrawColor(1);
-        u8g2.drawStr(75, 41, "NO");
-    } else {
-        u8g2.drawBox(68, 32, 30, 12); 
-        u8g2.drawStr(32, 41, "YES");
-        u8g2.setDrawColor(0);
-        u8g2.drawStr(75, 41, "NO");
-        u8g2.setDrawColor(1);
-    }
-}
+// exit popup removed; use shared yes/no prompt app
 
 void T9EditorApp::render() {
     renderHeader();
@@ -301,14 +309,9 @@ void T9EditorApp::render() {
         renderHelpPopup();
         return;
     }
-    
-    if (currentState == STATE_EXIT_CONFIRM) {
-        renderExitPopup();
-        return; 
-    }
 
     u8g2.drawVLine(GUTTER_WIDTH, 12, 52);
-    u8g2.setFont(u8g2_font_6x13_t_cyrillic); 
+    u8g2.setFont(u8g2_font_5x8_tr); 
     
     int yStart = HEADER_HEIGHT + LINE_HEIGHT; 
     
@@ -320,12 +323,15 @@ void T9EditorApp::render() {
         int y = yStart + (i * LINE_HEIGHT);
 
         if (vl.logicalLineNum != -1) {
-            u8g2.setFont(u8g2_font_micro_tr); 
-            u8g2.setCursor(1, y - 2);
+            // Use the same small font for line numbers so all text is consistent
+            u8g2.setFont(u8g2_font_5x8_tr);
+            u8g2.setCursor(1, y - 1);
             u8g2.print(vl.logicalLineNum);
-            u8g2.setFont(u8g2_font_6x13_t_cyrillic); 
+            u8g2.setFont(u8g2_font_5x8_tr);
         }
 
+        // Ensure content is rendered with the small font as well
+        u8g2.setFont(u8g2_font_5x8_tr);
         u8g2.drawUTF8(GUTTER_WIDTH + 2, y, vl.content.c_str());
 
         if (vl.hasCursor) {

@@ -8,15 +8,14 @@
 
 class MenuApp : public App {
   private:
-    static const int ITEM_COUNT = 7;
+    static const int ITEM_COUNT = 6;
     const char* menuItems[ITEM_COUNT] = {
-      "1. T9 Editor",
-      "2. Key Tester",
-      "3. Snake Game",
-      "4. GFX Test",
-      "5. Asteroids",
-      "6. Stopwatch",
-      "7. File Browser"
+      "1. Key Tester",
+      "2. Snake Game",
+      "3. GFX Test",
+      "4. Asteroids",
+      "5. Stopwatch",
+      "6. File Browser"
     };
 
     int selectedIndex;

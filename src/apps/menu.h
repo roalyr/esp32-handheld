@@ -38,12 +38,13 @@ class MenuApp : public App {
     };
     
     // Tools submenu
-    static const int TOOLS_COUNT = 4;
+    static const int TOOLS_COUNT = 5;
     MenuItem toolsMenu[TOOLS_COUNT] = {
         {"Key Tester", ITEM_APP, APP_KEY_TESTER, -1},
         {"GFX Test", ITEM_APP, APP_GFX_TEST, -1},
         {"Stopwatch", ITEM_APP, APP_STOPWATCH, -1},
-        {"Clock", ITEM_APP, APP_CLOCK, -1}
+        {"Clock", ITEM_APP, APP_CLOCK, -1},
+        {"Settings", ITEM_APP, APP_SETTINGS, -1}
     };
     
     // Files submenu

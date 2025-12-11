@@ -1,10 +1,12 @@
-// [Revision: v3.2] [Path: src/main.cpp] [Date: 2025-12-11]
-// Description: Main loop with clock system, per-app high-FPS support, APP_ID constants.
+// [Revision: v3.4] [Path: src/main.cpp] [Date: 2025-12-11]
+// Description: Main loop with boot splash, sleep mode, settings app, key repeat.
 
 #include <Arduino.h>
 #include "config.h"
 #include "hal.h"
 #include "clock.h"
+#include "gui.h"
+#include <esp_sleep.h>
 
 // App Modules
 #include "apps/t9_editor.h"
@@ -16,6 +18,7 @@
 #include "apps/yes_no_prompt.h"
 #include "apps/lua_runner.h"
 #include "apps/clock.h"
+#include "apps/settings.h"
 #include "app_transfer.h"
 
 // --------------------------------------------------------------------------
@@ -30,11 +33,91 @@ StopwatchApp appStopwatch;
 FileBrowserApp appFileBrowser;
 LuaRunnerApp appLuaRunner;
 ClockApp appClock;
+SettingsApp appSettings;
 
 App* currentApp = nullptr;
 
 // Timing Control
 unsigned long lastFrameTime = 0;
+unsigned long lastActivityTime = 0;
+bool sleepEnabled = SLEEP_ENABLED;
+bool isAsleep = false;
+
+// --------------------------------------------------------------------------
+// BOOT SPLASH
+// --------------------------------------------------------------------------
+
+void showBootSplash() {
+    u8g2.clearBuffer();
+    
+    // Title
+    u8g2.setFont(u8g2_font_ncenB10_tr);
+    const char* title = FIRMWARE_NAME;
+    int titleWidth = u8g2.getStrWidth(title);
+    u8g2.drawStr((GUI::SCREEN_WIDTH - titleWidth) / 2, 25, title);
+    
+    // Version
+    u8g2.setFont(u8g2_font_5x7_tf);
+    char verStr[32];
+    snprintf(verStr, sizeof(verStr), "v%s", FIRMWARE_VERSION);
+    int verWidth = u8g2.getStrWidth(verStr);
+    u8g2.drawStr((GUI::SCREEN_WIDTH - verWidth) / 2, 40, verStr);
+    
+    // Loading text
+    u8g2.drawStr((GUI::SCREEN_WIDTH - u8g2.getStrWidth("Initializing...")) / 2, 55, "Initializing...");
+    
+    u8g2.sendBuffer();
+    delay(1000);  // Show splash for 1 second
+}
+
+// --------------------------------------------------------------------------
+// SLEEP MODE
+// --------------------------------------------------------------------------
+
+void enterSleep() {
+    isAsleep = true;
+    
+    // Turn off display
+    u8g2.clearBuffer();
+    u8g2.sendBuffer();
+    u8g2.setPowerSave(1);  // Display power save mode
+    
+    // Configure wake-up on any GPIO (simplified - wake on any key)
+    // For ESP32-S3, we use light sleep with GPIO wake-up
+    esp_sleep_enable_timer_wakeup(100000);  // Wake every 100ms to check keys
+    
+    Serial.println("Entering sleep mode...");
+}
+
+void wakeUp() {
+    isAsleep = false;
+    u8g2.setPowerSave(0);  // Restore display
+    u8g2.setContrast(systemContrast);
+    lastActivityTime = millis();
+    Serial.println("Waking up...");
+}
+
+void checkSleepMode() {
+    if (!sleepEnabled) return;
+    
+    // Check for any key activity
+    if (activeKeyCount > 0) {
+        if (isAsleep) {
+            wakeUp();
+        }
+        lastActivityTime = millis();
+        return;
+    }
+    
+    // Check timeout
+    if (!isAsleep && (millis() - lastActivityTime >= SLEEP_TIMEOUT_MS)) {
+        enterSleep();
+    }
+}
+
+// --------------------------------------------------------------------------
+// APP MANAGEMENT
+// --------------------------------------------------------------------------
 
 void switchApp(App* newApp) {
   if (currentApp) currentApp->stop();
@@ -45,7 +128,12 @@ void switchApp(App* newApp) {
 void setup() {
   Serial.begin(115200);
   setupHardware();
+  
+  showBootSplash();
+  
   SystemClock::init();
+  lastActivityTime = millis();
+  
   switchApp(&appMenu);
 }
 
@@ -63,14 +151,27 @@ void loop() {
 
       // 1. HARDWARE SCAN
       scanMatrix();
+      
+      // 2. SLEEP MODE CHECK
+      checkSleepMode();
+      if (isAsleep) {
+          esp_light_sleep_start();  // Enter light sleep briefly
+          return;  // Skip rest of loop while asleep
+      }
     
-      // 2. EVENT HANDLING
+      // 3. EVENT HANDLING
       for(int i=0; i<activeKeyCount; i++) {
         char key = activeKeys[i];
         
-        if (isJustPressed(key)) {
-            // GLOBAL HOME KEY EXCEPTION
-            if (key == 'D') {
+        // Fire on initial press OR on repeat interval for repeatable keys
+        bool shouldFire = isJustPressed(key) || isRepeating(key);
+        
+        if (shouldFire) {
+            // Reset activity timer on any input
+            lastActivityTime = now;
+            
+            // GLOBAL HOME KEY EXCEPTION (D key - no repeat for menu navigation)
+            if (key == 'D' && isJustPressed(key)) {
                  // If we are in T9 Editor, let the app handle it (for popup)
                  if (currentApp == &appT9Editor) {
                      currentApp->handleInput(key);
@@ -88,7 +189,7 @@ void loop() {
                  continue;
             }
 
-            // REGULAR APP INPUT
+            // REGULAR APP INPUT (including repeats)
             if (currentApp) {
                 currentApp->handleInput(key);
             }
@@ -124,6 +225,7 @@ void loop() {
                       case APP_CLOCK:        switchApp(&appClock); break;
                       case APP_FILE_BROWSER: switchApp(&appFileBrowser); break;
                       case APP_LUA_RUNNER:   switchApp(&appLuaRunner); break;
+                      case APP_SETTINGS:     switchApp(&appSettings); break;
                   }
               }
           }

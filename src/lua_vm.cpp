@@ -1,9 +1,10 @@
-// [Revision: v1.1] [Path: src/lua_vm.cpp] [Date: 2025-12-11]
-// Description: Lua VM implementation with bindings for display, input, and filesystem.
+// [Revision: v1.2] [Path: src/lua_vm.cpp] [Date: 2025-12-11]
+// Description: Lua VM implementation with bindings for display, input, filesystem, and system clock.
 
 #include "lua_vm.h"
 #include "hal.h"
 #include "config.h"
+#include "clock.h"
 #include <SPIFFS.h>
 #include <lua.hpp>
 
@@ -250,6 +251,32 @@ static int lua_sys_yield(lua_State* L) {
     return 0;
 }
 
+// sys.time() - Get system clock time as table {hours, minutes, seconds}
+static int lua_sys_time(lua_State* L) {
+    lua_newtable(L);
+    lua_pushinteger(L, SystemClock::getHours());
+    lua_setfield(L, -2, "hours");
+    lua_pushinteger(L, SystemClock::getMinutes());
+    lua_setfield(L, -2, "minutes");
+    lua_pushinteger(L, SystemClock::getSeconds());
+    lua_setfield(L, -2, "seconds");
+    return 1;
+}
+
+// sys.timeStr() - Get formatted time string "HH:MM:SS"
+static int lua_sys_timeStr(lua_State* L) {
+    char buf[16];
+    SystemClock::getFullTimeString(buf, sizeof(buf));
+    lua_pushstring(L, buf);
+    return 1;
+}
+
+// sys.version() - Get firmware version string
+static int lua_sys_version(lua_State* L) {
+    lua_pushstring(L, FIRMWARE_VERSION);
+    return 1;
+}
+
 // print(str) - Print to serial
 static int lua_print(lua_State* L) {
     int n = lua_gettop(L);
@@ -275,6 +302,9 @@ static void registerSysModule(lua_State* L) {
         {"millis", lua_sys_millis},
         {"delay", lua_sys_delay},
         {"yield", lua_sys_yield},
+        {"time", lua_sys_time},
+        {"timeStr", lua_sys_timeStr},
+        {"version", lua_sys_version},
         {NULL, NULL}
     };
     

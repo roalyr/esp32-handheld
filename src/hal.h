@@ -1,5 +1,5 @@
-// [Revision: v2.0] [Path: src/hal.h] [Date: 2025-12-10]
-// Description: Added systemContrast external declaration.
+// [Revision: v2.1] [Path: src/hal.h] [Date: 2025-12-11]
+// Description: Added key repeat support for non-T9 keys.
 
 #ifndef HAL_H
 #define HAL_H
@@ -31,6 +31,7 @@ extern int activeKeyCount;
 
 void setupHardware();           
 void scanMatrix();              
-bool isJustPressed(char key);   
+bool isJustPressed(char key);
+bool isRepeating(char key);     // Returns true on repeat interval for held repeatable keys
 
 #endif

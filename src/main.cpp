@@ -1,5 +1,5 @@
-// [Revision: v2.7] [Path: src/main.cpp] [Date: 2025-12-10]
-// Description: Added File Browser app instantiation and routing.
+// [Revision: v2.8] [Path: src/main.cpp] [Date: 2025-12-11]
+// Description: Added Lua Runner app instantiation and routing.
 
 #include <Arduino.h>
 #include "config.h"
@@ -15,6 +15,7 @@
 #include "apps/stopwatch.h"
 #include "apps/file_browser.h"
 #include "apps/yes_no_prompt.h"
+#include "apps/lua_runner.h"
 #include "app_transfer.h"
 
 // --------------------------------------------------------------------------
@@ -29,6 +30,7 @@ MenuApp appMenu;
 AsteroidsApp appAsteroids;
 StopwatchApp appStopwatch;
 FileBrowserApp appFileBrowser;
+LuaRunnerApp appLuaRunner;
 
 App* currentApp = nullptr;
 
@@ -111,6 +113,7 @@ void loop() {
                       case 3: switchApp(&appAsteroids); break; 
                       case 4: switchApp(&appStopwatch); break;
                       case 5: switchApp(&appFileBrowser); break;
+                      case 6: switchApp(&appLuaRunner); break;
                   }
               }
           }

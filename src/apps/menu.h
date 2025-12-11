@@ -1,27 +1,66 @@
-// [Revision: v2.4] [Path: src/apps/menu.h] [Date: 2025-12-11]
-// Description: Added Lua Runner menu item.
+// [Revision: v3.0] [Path: src/apps/menu.h] [Date: 2025-12-11]
+// Description: Hierarchical main menu with categories.
 
 #ifndef APP_MENU_H
 #define APP_MENU_H
 
 #include "../app_interface.h"
 
+// Menu item types
+enum MenuItemType {
+    ITEM_CATEGORY = 0,  // Opens a submenu
+    ITEM_APP = 1        // Launches an app
+};
+
+// Menu item structure
+struct MenuItem {
+    const char* label;
+    MenuItemType type;
+    int appIndex;       // For ITEM_APP: which app to launch
+    int submenuIndex;   // For ITEM_CATEGORY: which submenu to show
+};
+
+// Menu level (for navigation)
+enum MenuLevel {
+    LEVEL_ROOT = 0,
+    LEVEL_SUBMENU = 1
+};
+
 class MenuApp : public App {
   private:
-    static const int ITEM_COUNT = 7;
-    const char* menuItems[ITEM_COUNT] = {
-      "1. Key Tester",
-      "2. Snake Game",
-      "3. GFX Test",
-      "4. Asteroids",
-      "5. Stopwatch",
-      "6. File Browser",
-      "7. Lua Runner"
+    // Root menu categories
+    static const int ROOT_COUNT = 2;
+    MenuItem rootMenu[ROOT_COUNT] = {
+        {"Tools", ITEM_CATEGORY, -1, 0},
+        {"Files", ITEM_CATEGORY, -1, 1}
     };
-
+    
+    // Tools submenu
+    static const int TOOLS_COUNT = 3;
+    MenuItem toolsMenu[TOOLS_COUNT] = {
+        {"Key Tester", ITEM_APP, 0, -1},
+        {"GFX Test", ITEM_APP, 1, -1},
+        {"Stopwatch", ITEM_APP, 2, -1}
+    };
+    
+    // Files submenu
+    static const int FILES_COUNT = 2;
+    MenuItem filesMenu[FILES_COUNT] = {
+        {"File Browser", ITEM_APP, 3, -1},
+        {"Lua Runner", ITEM_APP, 4, -1}
+    };
+    
+    // Navigation state
+    MenuLevel currentLevel;
+    int currentSubmenu;     // Which submenu is active (0=Tools, 1=Files)
     int selectedIndex;
-    int scrollOffset; // Index of the first visible item
-    int pendingSwitchIndex; 
+    int scrollOffset;
+    int pendingSwitchIndex;
+    
+    // Helper methods
+    int getCurrentMenuCount();
+    MenuItem* getCurrentMenu();
+    const char* getCurrentTitle();
 
   public:
     MenuApp();
@@ -30,7 +69,8 @@ class MenuApp : public App {
     void update() override;
     void render() override;
     void handleInput(char key) override;
-    int getPendingSwitch(); 
+    int getPendingSwitch();
+    bool isInSubmenu() { return currentLevel == LEVEL_SUBMENU; }
 };
 
 #endif

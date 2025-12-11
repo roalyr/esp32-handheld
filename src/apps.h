@@ -10,12 +10,6 @@ void renderKeyTester(char lastKey, char* heldKeys, int count);
 void setupTester();
 void addToTesterHistory(char c);
 
-// --- SNAKE GAME ---
-void setupSnake();
-void handleSnakeInput(char key);
-void updateSnake();
-void renderSnake();
-
 // --- GFX TESTER ---
 void renderGfxTest();
 

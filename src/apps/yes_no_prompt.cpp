@@ -1,7 +1,8 @@
-// [Revision: v1.0] [Path: src/apps/yes_no_prompt.cpp] [Date: 2025-12-10]
-// Description: Yes/No prompt implementation. Uses `app_transfer` to store result.
+// [Revision: v2.0] [Path: src/apps/yes_no_prompt.cpp] [Date: 2025-12-11]
+// Description: Yes/No prompt - refactored to use unified GUI module.
 
 #include "yes_no_prompt.h"
+#include "../gui.h"
 #include "../app_transfer.h"
 #include "../app_control.h"
 #include "../hal.h"
@@ -20,7 +21,6 @@ void YesNoPromptApp::startPrompt(App* callerApp, const String& msg) {
     message = msg;
     selection = false;
     active = true;
-    // Ensure app_transfer caller is set by caller prior to switching
 }
 
 void YesNoPromptApp::start() {
@@ -35,6 +35,7 @@ void YesNoPromptApp::handleInput(char key) {
     // Use 4/6 for left/right selection, 5 to confirm, D to cancel
     if (key == '4') selection = true;
     if (key == '6') selection = false;
+    
     if (key == 'D') {
         // Cancel and return false
         appTransferBool = false;
@@ -52,39 +53,18 @@ void YesNoPromptApp::handleInput(char key) {
         active = false;
         App* ret = caller;
         caller = nullptr;
-        // Do not clear action/path — caller will process
-        appTransferCaller = nullptr; // caller will be switched back
+        appTransferCaller = nullptr;
         switchApp(ret);
         return;
     }
 }
 
 void YesNoPromptApp::render() {
-    u8g2.setFont(FONT_SMALL);
     // Dim background
     u8g2.setDrawColor(0);
-    u8g2.drawBox(0, 0, 128, 64);
+    u8g2.drawBox(0, 0, GUI::SCREEN_WIDTH, GUI::SCREEN_HEIGHT);
     u8g2.setDrawColor(1);
 
-    // Message box
-    u8g2.drawFrame(10, 12, 108, 40);
-    u8g2.drawStr(14, 24, message.c_str());
-
-    // Options
-    if (selection) {
-        // YES selected: draw left box and render YES in black on white, NO in white on black
-        u8g2.drawBox(22, 38, 36, 12);
-        u8g2.setDrawColor(0);
-        u8g2.drawStr(28, 48, "YES");
-        u8g2.setDrawColor(1);
-        u8g2.drawStr(78, 48, "NO");
-    } else {
-        // NO selected: draw right box and render YES in white on black, NO in black on white
-        u8g2.drawBox(72, 38, 36, 12);
-        u8g2.setDrawColor(1);
-        u8g2.drawStr(28, 48, "YES");
-        u8g2.setDrawColor(0);
-        u8g2.drawStr(78, 48, "NO");
-        u8g2.setDrawColor(1);
-    }
+    // Use unified Yes/No dialog
+    GUI::drawYesNoDialog(message.c_str(), selection);
 }

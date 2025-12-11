@@ -1,5 +1,5 @@
-// [Revision: v1.0] [Path: src/apps/file_browser.h] [Date: 2025-12-10]
-// Description: File browser app with dual storage (SPIFFS/SD) and context menu support.
+// [Revision: v1.1] [Path: src/apps/file_browser.h] [Date: 2025-12-11]
+// Description: File browser app with SPIFFS support, context menu, and Lua execution.
 
 #ifndef APP_FILE_BROWSER_H
 #define APP_FILE_BROWSER_H
@@ -20,9 +20,16 @@ enum MenuState {
   MENU_FILE_CONTEXT = 1    // Context menu for selected file
 };
 
+// Browser mode (for Lua running support)
+enum BrowserMode {
+  BROWSE_MODE = 0,
+  LUA_RUNNING = 1,
+  LUA_ERROR = 2
+};
+
 class FileBrowserApp : public App {
   private:
-    static const int VISIBLE_ITEMS = 4;
+    static const int VISIBLE_ITEMS = 3;
     static const int HEADER_HEIGHT = 12;
     static const int LINE_HEIGHT = 10;
     static const int START_Y = 24;
@@ -46,12 +53,21 @@ class FileBrowserApp : public App {
     enum SortMode { SORT_NAME = 0, SORT_MTIME = 1 };
     SortMode sortMode;
 
+    // Lua execution state
+    BrowserMode browserMode;
+    String currentLuaScript;
+    String luaErrorMessage;
+
     // Private helper methods
     void scanDirectory(const String& path);
     String truncateFilename(const String& name, int maxLen);
     void openFileContextMenu();
     void closeMenu();
     void handleFileAction(int actionIndex);
+    bool isLuaFile(const String& name);
+    void runLuaScript(const String& path);
+    void drawLuaRunning();
+    void drawLuaError();
 
   public:
     FileBrowserApp();

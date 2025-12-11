@@ -27,7 +27,7 @@ extern char keyMap[ROWS][COLS];
 // TIMING & CONFIG CONSTANTS
 // --------------------------------------------------------------------------
 
-#define PHYSICAL_FPS 10
+#define PHYSICAL_FPS 30
 #define FRAME_DELAY_MS (1000 / PHYSICAL_FPS)
 
 #define MULTITAP_TIMEOUT 800   

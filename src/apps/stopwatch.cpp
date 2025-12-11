@@ -1,8 +1,9 @@
-// [Revision: v1.0] [Path: src/apps/stopwatch.cpp] [Date: 2025-12-10]
-// Description: Stopwatch logic.
+// [Revision: v2.0] [Path: src/apps/stopwatch.cpp] [Date: 2025-12-11]
+// Description: Stopwatch app - refactored to use unified GUI module.
 // Controls: [5] Toggle Start/Stop, [0] Reset (when stopped).
 
 #include "stopwatch.h"
+#include "../gui.h"
 
 StopwatchApp::StopwatchApp() {
     isRunning = false;
@@ -22,7 +23,6 @@ void StopwatchApp::stop() {
 
 unsigned long StopwatchApp::getTotalTime() {
     if (isRunning) {
-        // Current time = Previously stored time + (Now - Start timestamp)
         return accumulatedTime + (millis() - startTime);
     } else {
         return accumulatedTime;
@@ -34,10 +34,9 @@ void StopwatchApp::update() {
 }
 
 void StopwatchApp::handleInput(char key) {
-    // 5 = PAUSE / RESUME
     if (key == '5') {
         if (isRunning) {
-            // PAUSE: Save the elapsed time to the accumulator
+            // PAUSE: Save the elapsed time
             accumulatedTime += (millis() - startTime);
             isRunning = false;
         } else {
@@ -47,18 +46,16 @@ void StopwatchApp::handleInput(char key) {
         }
     }
     
-    // 0 = RESET (Only allowed when paused)
+    // RESET (Only allowed when paused)
     if (key == '0' && !isRunning) {
         accumulatedTime = 0;
     }
 }
 
 void StopwatchApp::render() {
-    u8g2.setFont(FONT_SMALL);
-    u8g2.drawStr(2, 8, "STOPWATCH");
-    u8g2.drawHLine(0, 10, 128);
+    GUI::drawHeader("STOPWATCH");
     
-    // 1. Calculate Time Components
+    // Calculate Time Components
     unsigned long totalMillis = getTotalTime();
     unsigned long totalSeconds = totalMillis / 1000;
     
@@ -66,21 +63,19 @@ void StopwatchApp::render() {
     unsigned long minutes = (totalSeconds % 3600) / 60;
     unsigned long seconds = totalSeconds % 60;
     
-    // 2. Format String (HH:MM:SS)
+    // Format String (HH:MM:SS)
     char buf[16];
     sprintf(buf, "%02lu:%02lu:%02lu", hours, minutes, seconds);
     
-    // 3. Draw Large Time
-    // Using B14 font to ensure "00:00:00" fits on 128px screen
+    // Draw Large Time (centered)
     u8g2.setFont(u8g2_font_ncenB14_tr); 
     int width = u8g2.getStrWidth(buf);
-    u8g2.drawStr((128 - width) / 2, 40, buf); 
+    u8g2.drawStr((GUI::SCREEN_WIDTH - width) / 2, 40, buf); 
     
-    // 4. Draw Controls
-    u8g2.setFont(u8g2_font_micro_tr); // Tiny font for hints
+    // Draw Controls
     if (isRunning) {
-        u8g2.drawStr(40, 60, "[5] PAUSE");
+        GUI::drawFooter("[5] PAUSE");
     } else {
-        u8g2.drawStr(15, 60, "[5] RESUME   [0] RESET");
+        GUI::drawFooterHints("[5] RESUME", "[0] RESET");
     }
 }

@@ -1,15 +1,18 @@
-// [Revision: v1.1] [Path: src/apps/lua_runner.cpp] [Date: 2025-12-11]
-// Description: Implementation of Lua script browser and runner.
+// [Revision: v2.3] [Path: src/apps/lua_runner.cpp] [Date: 2025-12-11]
+// Description: Lua script browser and runner - refactored to use unified GUI module.
 
 #include "lua_runner.h"
 #include "../hal.h"
+#include "../gui.h"
 #include "../lua_vm.h"
 #include <SPIFFS.h>
 
+extern "C" {
+#include <lua/lua.h>  // For LUA_VERSION_MAJOR/MINOR
+}
+
 // Number of visible lines in browser
-static constexpr int VISIBLE_LINES = 6;
-static constexpr int LINE_HEIGHT = 9;
-static constexpr int HEADER_HEIGHT = 10;
+static constexpr int VISIBLE_LINES = 3;
 
 void LuaRunnerApp::start() {
     mode = BROWSE;
@@ -70,92 +73,92 @@ void LuaRunnerApp::scanForLuaFiles() {
 }
 
 void LuaRunnerApp::drawBrowser() {
-    u8g2.setFont(u8g2_font_5x7_tf);
-    
-    // Header
-    u8g2.drawStr(0, 7, "Lua Scripts");
-    u8g2.drawHLine(0, HEADER_HEIGHT, 128);
+    // Header with Lua version and current/total
+    char headerInfo[20];
+    if (fileCount > 0) {
+        snprintf(headerInfo, sizeof(headerInfo), "%s.%s %d/%d", LUA_VERSION_MAJOR, LUA_VERSION_MINOR, selectedIndex + 1, fileCount);
+    } else {
+        snprintf(headerInfo, sizeof(headerInfo), "%s.%s 0/0", LUA_VERSION_MAJOR, LUA_VERSION_MINOR);
+    }
+    GUI::drawHeader("LUA", headerInfo);
     
     if (fileCount == 0) {
+        GUI::setFontSmall();
         u8g2.drawStr(10, 35, "No .lua files found");
         u8g2.drawStr(10, 45, "Upload via SPIFFS");
     } else {
-        // Draw file list
+        // Prepare display names (strip leading /)
+        GUI::setFontSmall();
         for (int i = 0; i < VISIBLE_LINES && (scrollOffset + i) < fileCount; i++) {
             int idx = scrollOffset + i;
-            int y = HEADER_HEIGHT + 8 + (i * LINE_HEIGHT);
+            int y = GUI::CONTENT_START_Y + (i * GUI::LINE_HEIGHT);
             
             // Highlight selected
             if (idx == selectedIndex) {
-                u8g2.drawBox(0, y - 7, 128, LINE_HEIGHT);
+                u8g2.drawBox(0, y - 8, 123, GUI::LINE_HEIGHT);
                 u8g2.setDrawColor(0);
             }
             
-            // Draw filename (truncate if too long)
+            // Draw filename (strip leading /, truncate)
             String displayName = files[idx];
             if (displayName.startsWith("/")) {
                 displayName = displayName.substring(1);
             }
-            if (displayName.length() > 20) {
-                displayName = displayName.substring(0, 17) + "...";
-            }
+            displayName = GUI::truncateString(displayName, 20);
             u8g2.drawStr(2, y, displayName.c_str());
             
             u8g2.setDrawColor(1);
         }
         
-        // Scroll indicator
+        // Scrollbar (accounting for header and footer)
         if (fileCount > VISIBLE_LINES) {
-            int barHeight = (VISIBLE_LINES * LINE_HEIGHT * VISIBLE_LINES) / fileCount;
-            int barY = HEADER_HEIGHT + 2 + (scrollOffset * (VISIBLE_LINES * LINE_HEIGHT - barHeight)) / (fileCount - VISIBLE_LINES);
-            u8g2.drawVLine(126, HEADER_HEIGHT + 2, VISIBLE_LINES * LINE_HEIGHT);
-            u8g2.drawBox(125, barY, 3, barHeight);
+            GUI::drawScrollbar(GUI::SCREEN_WIDTH - GUI::SCROLLBAR_WIDTH - 1,
+                              GUI::HEADER_HEIGHT,
+                              GUI::SCREEN_HEIGHT - GUI::HEADER_HEIGHT - GUI::FOOTER_HEIGHT,
+                              fileCount, VISIBLE_LINES, scrollOffset);
         }
     }
     
-    // Footer with controls
-    u8g2.drawHLine(0, 55, 128);
-    u8g2.drawStr(0, 63, "5:Run  D:Back");
+    GUI::drawFooterHints("5:Run", "D:Back");
 }
 
 void LuaRunnerApp::drawRunning() {
-    u8g2.setFont(u8g2_font_5x7_tf);
-    u8g2.drawStr(0, 7, "Running:");
+    GUI::drawHeader("RUNNING");
     
+    GUI::setFontSmall();
     String name = currentScript;
     if (name.startsWith("/")) name = name.substring(1);
-    if (name.length() > 20) name = name.substring(0, 17) + "...";
-    u8g2.drawStr(0, 17, name.c_str());
+    name = GUI::truncateString(name, 20);
+    u8g2.drawStr(2, 24, name.c_str());
     
-    u8g2.drawStr(0, 35, "Press * or # to exit");
+    u8g2.drawStr(2, 40, "Press * or # to exit");
     
     // Memory usage
     char memStr[32];
-    snprintf(memStr, sizeof(memStr), "Lua Mem: %d KB", (int)(LuaVM::getMemoryUsage() / 1024));
-    u8g2.drawStr(0, 55, memStr);
+    snprintf(memStr, sizeof(memStr), "Mem: %d KB", (int)(LuaVM::getMemoryUsage() / 1024));
+    u8g2.drawStr(2, 55, memStr);
 }
 
 void LuaRunnerApp::drawError() {
-    u8g2.setFont(u8g2_font_5x7_tf);
-    u8g2.drawStr(0, 7, "Lua Error:");
-    u8g2.drawHLine(0, 9, 128);
+    GUI::drawHeader("LUA ERROR");
+    
+    GUI::setFontSmall();
     
     // Word-wrap error message
-    int y = 18;
+    int y = 24;
     int lineStart = 0;
     int maxChars = 25;
     
-    for (int i = 0; i <= (int)errorMessage.length() && y < 55; i++) {
+    for (int i = 0; i <= (int)errorMessage.length() && y < 52; i++) {
         if (i == (int)errorMessage.length() || (i - lineStart) >= maxChars) {
             String line = errorMessage.substring(lineStart, i);
-            u8g2.drawStr(0, y, line.c_str());
+            u8g2.drawStr(2, y, line.c_str());
             y += 8;
             lineStart = i;
         }
     }
     
-    u8g2.drawHLine(0, 55, 128);
-    u8g2.drawStr(0, 63, "Any key: Back");
+    GUI::drawFooter("Any key: Back");
 }
 
 void LuaRunnerApp::runSelectedScript() {
@@ -189,36 +192,22 @@ void LuaRunnerApp::render() {
 
 void LuaRunnerApp::handleInput(char key) {
     switch (mode) {
-        case BROWSE:
-            switch (key) {
-                case '2': // Up
-                    if (selectedIndex > 0) {
-                        selectedIndex--;
-                        if (selectedIndex < scrollOffset) {
-                            scrollOffset = selectedIndex;
-                        }
-                    }
-                    break;
-                    
-                case '8': // Down
-                    if (selectedIndex < fileCount - 1) {
-                        selectedIndex++;
-                        if (selectedIndex >= scrollOffset + VISIBLE_LINES) {
-                            scrollOffset = selectedIndex - VISIBLE_LINES + 1;
-                        }
-                    }
-                    break;
-                    
-                case '5': // OK - Run script
-                    if (fileCount > 0) {
-                        runSelectedScript();
-                    }
-                    break;
+        case BROWSE: {
+            GUI::ScrollState state = {selectedIndex, scrollOffset, fileCount, VISIBLE_LINES};
+            if (GUI::handleListNavigation(state, key)) {
+                selectedIndex = state.selectedIndex;
+                scrollOffset = state.scrollOffset;
+                break;
+            }
+            
+            if (key == '5' && fileCount > 0) {
+                runSelectedScript();
             }
             break;
+        }
             
         case RUNNING:
-            // Allow exiting with any key for now
+            // Allow exiting with * or #
             if (key == '*' || key == '#') {
                 mode = BROWSE;
                 LuaVM::collectGarbage();

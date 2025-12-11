@@ -1,5 +1,5 @@
-// [Revision: v2.8] [Path: src/main.cpp] [Date: 2025-12-11]
-// Description: Added Lua Runner app instantiation and routing.
+// [Revision: v3.0] [Path: src/main.cpp] [Date: 2025-12-11]
+// Description: Main loop with per-app high-FPS support for GfxTest ghosting mode.
 
 #include <Arduino.h>
 #include "config.h"
@@ -8,10 +8,8 @@
 // App Modules
 #include "apps/t9_editor.h"
 #include "apps/key_tester.h"
-#include "apps/snake.h"
 #include "apps/gfx_test.h"
 #include "apps/menu.h"
-#include "apps/asteroids.h"
 #include "apps/stopwatch.h"
 #include "apps/file_browser.h"
 #include "apps/yes_no_prompt.h"
@@ -24,10 +22,8 @@
 
 T9EditorApp appT9Editor;
 KeyTesterApp appKeyTester;
-SnakeApp appSnake;
 GfxTestApp appGfxTest;
 MenuApp appMenu;
-AsteroidsApp appAsteroids;
 StopwatchApp appStopwatch;
 FileBrowserApp appFileBrowser;
 LuaRunnerApp appLuaRunner;
@@ -52,8 +48,13 @@ void setup() {
 void loop() {
   unsigned long now = millis();
   
-  // Enforce 60 FPS
-  if (now - lastFrameTime >= FRAME_DELAY_MS) {
+  // Check if current app needs high-FPS mode (e.g., GfxTest ghosting mode)
+  bool highFpsMode = (currentApp == &appGfxTest && appGfxTest.needsHighFps());
+  
+  // Use minimal delay for high-FPS mode, normal frame delay otherwise
+  unsigned long frameDelay = highFpsMode ? 1 : FRAME_DELAY_MS;
+  
+  if (now - lastFrameTime >= frameDelay) {
       lastFrameTime = now;
 
       // 1. HARDWARE SCAN
@@ -68,6 +69,12 @@ void loop() {
             if (key == 'D') {
                  // If we are in T9 Editor, let the app handle it (for popup)
                  if (currentApp == &appT9Editor) {
+                     currentApp->handleInput(key);
+                     continue;
+                 }
+                 
+                 // If we are in Menu submenu, let the menu handle it (go back)
+                 if (currentApp == &appMenu && appMenu.isInSubmenu()) {
                      currentApp->handleInput(key);
                      continue;
                  }
@@ -108,12 +115,10 @@ void loop() {
               if (req != -1) {
                   switch(req) {
                       case 0: switchApp(&appKeyTester); break;
-                      case 1: switchApp(&appSnake); break;
-                      case 2: switchApp(&appGfxTest); break;
-                      case 3: switchApp(&appAsteroids); break; 
-                      case 4: switchApp(&appStopwatch); break;
-                      case 5: switchApp(&appFileBrowser); break;
-                      case 6: switchApp(&appLuaRunner); break;
+                      case 1: switchApp(&appGfxTest); break;
+                      case 2: switchApp(&appStopwatch); break;
+                      case 3: switchApp(&appFileBrowser); break;
+                      case 4: switchApp(&appLuaRunner); break;
                   }
               }
           }

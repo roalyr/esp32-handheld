@@ -1,16 +1,12 @@
-// [Revision: v2.3] [Path: src/apps/menu.cpp] [Date: 2025-12-10]
-// Description: Added File Browser menu item to app list.
-// Visuals: Shows 4 items at a time.
+// [Revision: v4.0] [Path: src/apps/menu.cpp] [Date: 2025-12-11]
+// Description: Hierarchical main menu with categories - uses unified GUI module.
 
 #include "menu.h"
-
-// Configuration
-const int VISIBLE_ITEMS = 4;
-const int HEADER_HEIGHT = 12;
-const int LINE_HEIGHT = 10;
-const int START_Y = 24; // Y position of the first item line
+#include "../gui.h"
 
 MenuApp::MenuApp() {
+    currentLevel = LEVEL_ROOT;
+    currentSubmenu = -1;
     selectedIndex = 0;
     scrollOffset = 0;
     pendingSwitchIndex = -1;
@@ -19,9 +15,11 @@ MenuApp::MenuApp() {
 void MenuApp::start() {
     u8g2.setContrast(systemContrast);
     pendingSwitchIndex = -1;
-    // Keep previous selection/scroll state or reset if desired:
-    // selectedIndex = 0; 
-    // scrollOffset = 0;
+    // Reset to root menu on start
+    currentLevel = LEVEL_ROOT;
+    currentSubmenu = -1;
+    selectedIndex = 0;
+    scrollOffset = 0;
 }
 
 void MenuApp::stop() {}
@@ -29,82 +27,102 @@ void MenuApp::update() {}
 
 int MenuApp::getPendingSwitch() {
     int temp = pendingSwitchIndex;
-    pendingSwitchIndex = -1; 
+    pendingSwitchIndex = -1;
     return temp;
 }
 
+int MenuApp::getCurrentMenuCount() {
+    if (currentLevel == LEVEL_ROOT) {
+        return ROOT_COUNT;
+    } else {
+        switch (currentSubmenu) {
+            case 0: return TOOLS_COUNT;
+            case 1: return FILES_COUNT;
+            default: return 0;
+        }
+    }
+}
+
+MenuItem* MenuApp::getCurrentMenu() {
+    if (currentLevel == LEVEL_ROOT) {
+        return rootMenu;
+    } else {
+        switch (currentSubmenu) {
+            case 0: return toolsMenu;
+            case 1: return filesMenu;
+            default: return nullptr;
+        }
+    }
+}
+
+const char* MenuApp::getCurrentTitle() {
+    if (currentLevel == LEVEL_ROOT) {
+        return "MAIN MENU";
+    } else {
+        switch (currentSubmenu) {
+            case 0: return "TOOLS";
+            case 1: return "FILES";
+            default: return "MENU";
+        }
+    }
+}
+
 void MenuApp::handleInput(char key) {
-    // UP (2)
-    if (key == '2') {
-        selectedIndex--;
-        if (selectedIndex < 0) {
-            // Wrap to bottom
-            selectedIndex = ITEM_COUNT - 1;
-            scrollOffset = ITEM_COUNT - VISIBLE_ITEMS;
-            if (scrollOffset < 0) scrollOffset = 0;
-        } else if (selectedIndex < scrollOffset) {
-            // Scroll Up
-            scrollOffset--;
-        }
+    int count = getCurrentMenuCount();
+    
+    GUI::ScrollState state = {selectedIndex, scrollOffset, count, 4};
+    
+    if (GUI::handleListNavigation(state, key)) {
+        selectedIndex = state.selectedIndex;
+        scrollOffset = state.scrollOffset;
     }
     
-    // DOWN (8)
-    if (key == '8') {
-        selectedIndex++;
-        if (selectedIndex >= ITEM_COUNT) {
-            // Wrap to top
-            selectedIndex = 0;
-            scrollOffset = 0;
-        } else if (selectedIndex >= scrollOffset + VISIBLE_ITEMS) {
-            // Scroll Down
-            scrollOffset++;
-        }
-    }
-    
-    // ENTER (5)
+    // ENTER (5) - select item
     if (key == '5') {
-        pendingSwitchIndex = selectedIndex;
+        MenuItem* menu = getCurrentMenu();
+        if (menu && selectedIndex < count) {
+            MenuItem& item = menu[selectedIndex];
+            if (item.type == ITEM_CATEGORY) {
+                // Enter submenu
+                currentLevel = LEVEL_SUBMENU;
+                currentSubmenu = item.submenuIndex;
+                selectedIndex = 0;
+                scrollOffset = 0;
+            } else if (item.type == ITEM_APP) {
+                // Launch app
+                pendingSwitchIndex = item.appIndex;
+            }
+        }
+    }
+    
+    // BACK (D) - go back to parent menu
+    if (key == 'D' && currentLevel == LEVEL_SUBMENU) {
+        currentLevel = LEVEL_ROOT;
+        currentSubmenu = -1;
+        selectedIndex = 0;
+        scrollOffset = 0;
     }
 }
 
 void MenuApp::render() {
-    u8g2.setFont(FONT_SMALL);
+    GUI::drawHeader(getCurrentTitle());
     
-    // 1. Draw Header
-    u8g2.drawBox(0, 0, 128, HEADER_HEIGHT);
-    u8g2.setDrawColor(0); 
-    u8g2.drawStr(2, 9, "MAIN MENU");
-    u8g2.setDrawColor(1); 
+    // Build labels array for drawList
+    MenuItem* menu = getCurrentMenu();
+    int count = getCurrentMenuCount();
     
-    // 2. Draw Scrollbar (Simple indicator)
-    // Draw a line on the right edge representing the full list size
-    // and a box representing the current view
-    int scrollBarH = 64 - HEADER_HEIGHT;
-    int knobH = (scrollBarH * VISIBLE_ITEMS) / ITEM_COUNT;
-    int knobY = HEADER_HEIGHT + (scrollBarH * scrollOffset) / ITEM_COUNT;
-    
-    u8g2.drawVLine(126, HEADER_HEIGHT, scrollBarH); // Track
-    u8g2.drawBox(125, knobY, 3, knobH);             // Knob
-
-    // 3. Draw Visible Items
-    for(int i = 0; i < VISIBLE_ITEMS; i++) {
-        int itemIndex = scrollOffset + i;
-        if (itemIndex >= ITEM_COUNT) break;
-
-        int y = START_Y + (i * LINE_HEIGHT);
-        
-        // Highlight Selection
-        if (itemIndex == selectedIndex) {
-            u8g2.drawStr(0, y, ">");
-            u8g2.drawBox(8, y - 8, 115, 10); 
-            u8g2.setDrawColor(0); 
-        } else {
-            u8g2.setDrawColor(1);
+    if (menu && count > 0) {
+        const char* labels[10]; // Max items in any menu
+        for (int i = 0; i < count && i < 10; i++) {
+            labels[i] = menu[i].label;
         }
-        
-        u8g2.drawUTF8(10, y, menuItems[itemIndex]);
+        GUI::drawList(labels, count, selectedIndex, scrollOffset);
     }
     
-    // Safety reset
-    u8g2.setDrawColor(1);
+    // Footer hints
+    if (currentLevel == LEVEL_ROOT) {
+        GUI::drawFooterHints("5:Open", "");
+    } else {
+        GUI::drawFooterHints("5:Select", "D:Back");
+    }
 }

@@ -1,9 +1,10 @@
-// [Revision: v3.0] [Path: src/main.cpp] [Date: 2025-12-11]
-// Description: Main loop with per-app high-FPS support for GfxTest ghosting mode.
+// [Revision: v3.1] [Path: src/main.cpp] [Date: 2025-12-11]
+// Description: Main loop with clock system and per-app high-FPS support.
 
 #include <Arduino.h>
 #include "config.h"
 #include "hal.h"
+#include "clock.h"
 
 // App Modules
 #include "apps/t9_editor.h"
@@ -14,6 +15,7 @@
 #include "apps/file_browser.h"
 #include "apps/yes_no_prompt.h"
 #include "apps/lua_runner.h"
+#include "apps/clock.h"
 #include "app_transfer.h"
 
 // --------------------------------------------------------------------------
@@ -27,6 +29,7 @@ MenuApp appMenu;
 StopwatchApp appStopwatch;
 FileBrowserApp appFileBrowser;
 LuaRunnerApp appLuaRunner;
+ClockApp appClock;
 
 App* currentApp = nullptr;
 
@@ -42,6 +45,7 @@ void switchApp(App* newApp) {
 void setup() {
   Serial.begin(115200);
   setupHardware();
+  SystemClock::init();
   switchApp(&appMenu);
 }
 
@@ -117,8 +121,9 @@ void loop() {
                       case 0: switchApp(&appKeyTester); break;
                       case 1: switchApp(&appGfxTest); break;
                       case 2: switchApp(&appStopwatch); break;
-                      case 3: switchApp(&appFileBrowser); break;
-                      case 4: switchApp(&appLuaRunner); break;
+                      case 3: switchApp(&appClock); break;
+                      case 4: switchApp(&appFileBrowser); break;
+                      case 5: switchApp(&appLuaRunner); break;
                   }
               }
           }

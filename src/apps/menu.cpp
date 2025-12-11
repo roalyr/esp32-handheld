@@ -1,8 +1,10 @@
-// [Revision: v4.0] [Path: src/apps/menu.cpp] [Date: 2025-12-11]
-// Description: Hierarchical main menu with categories - uses unified GUI module.
+// [Revision: v4.2] [Path: src/apps/menu.cpp] [Date: 2025-12-11]
+// Description: Hierarchical main menu with categories - uses unified GUI module. Shows clock in header.
+//              Submenus show item count (e.g., "1/4") in header.
 
 #include "menu.h"
 #include "../gui.h"
+#include "../clock.h"
 
 MenuApp::MenuApp() {
     currentLevel = LEVEL_ROOT;
@@ -69,8 +71,9 @@ const char* MenuApp::getCurrentTitle() {
 
 void MenuApp::handleInput(char key) {
     int count = getCurrentMenuCount();
+    int visibleItems = (currentLevel == LEVEL_SUBMENU) ? 3 : 4;
     
-    GUI::ScrollState state = {selectedIndex, scrollOffset, count, 4};
+    GUI::ScrollState state = {selectedIndex, scrollOffset, count, visibleItems};
     
     if (GUI::handleListNavigation(state, key)) {
         selectedIndex = state.selectedIndex;
@@ -105,18 +108,30 @@ void MenuApp::handleInput(char key) {
 }
 
 void MenuApp::render() {
-    GUI::drawHeader(getCurrentTitle());
+    // Header with clock on right side (root) or item count (submenu)
+    char infoStr[16];
+    int count = getCurrentMenuCount();
+    
+    if (currentLevel == LEVEL_ROOT) {
+        SystemClock::getTimeString(infoStr, sizeof(infoStr));
+    } else {
+        // Show "1/4" style counter in submenu
+        snprintf(infoStr, sizeof(infoStr), "%d/%d", selectedIndex + 1, count);
+    }
+    GUI::drawHeader(getCurrentTitle(), infoStr);
     
     // Build labels array for drawList
     MenuItem* menu = getCurrentMenu();
-    int count = getCurrentMenuCount();
+    int visibleItems = (currentLevel == LEVEL_SUBMENU) ? 3 : 4;
     
     if (menu && count > 0) {
         const char* labels[10]; // Max items in any menu
         for (int i = 0; i < count && i < 10; i++) {
             labels[i] = menu[i].label;
         }
-        GUI::drawList(labels, count, selectedIndex, scrollOffset);
+        GUI::ListConfig cfg;
+        cfg.visibleItems = visibleItems;
+        GUI::drawList(labels, count, selectedIndex, scrollOffset, cfg);
     }
     
     // Footer hints

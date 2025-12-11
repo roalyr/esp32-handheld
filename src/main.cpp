@@ -1,5 +1,5 @@
-// [Revision: v3.1] [Path: src/main.cpp] [Date: 2025-12-11]
-// Description: Main loop with clock system and per-app high-FPS support.
+// [Revision: v3.2] [Path: src/main.cpp] [Date: 2025-12-11]
+// Description: Main loop with clock system, per-app high-FPS support, APP_ID constants.
 
 #include <Arduino.h>
 #include "config.h"
@@ -118,12 +118,12 @@ void loop() {
               int req = appMenu.getPendingSwitch();
               if (req != -1) {
                   switch(req) {
-                      case 0: switchApp(&appKeyTester); break;
-                      case 1: switchApp(&appGfxTest); break;
-                      case 2: switchApp(&appStopwatch); break;
-                      case 3: switchApp(&appClock); break;
-                      case 4: switchApp(&appFileBrowser); break;
-                      case 5: switchApp(&appLuaRunner); break;
+                      case APP_KEY_TESTER:   switchApp(&appKeyTester); break;
+                      case APP_GFX_TEST:     switchApp(&appGfxTest); break;
+                      case APP_STOPWATCH:    switchApp(&appStopwatch); break;
+                      case APP_CLOCK:        switchApp(&appClock); break;
+                      case APP_FILE_BROWSER: switchApp(&appFileBrowser); break;
+                      case APP_LUA_RUNNER:   switchApp(&appLuaRunner); break;
                   }
               }
           }

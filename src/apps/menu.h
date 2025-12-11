@@ -1,10 +1,12 @@
-// [Revision: v3.1] [Path: src/apps/menu.h] [Date: 2025-12-11]
+// [Revision: v3.2] [Path: src/apps/menu.h] [Date: 2025-12-11]
 // Description: Hierarchical main menu with categories. Shows clock in header.
+//              Uses APP_ID constants from config.h.
 
 #ifndef APP_MENU_H
 #define APP_MENU_H
 
 #include "../app_interface.h"
+#include "../config.h"
 
 // Menu item types
 enum MenuItemType {
@@ -35,20 +37,20 @@ class MenuApp : public App {
         {"Files", ITEM_CATEGORY, -1, 1}
     };
     
-    // Tools submenu (added Clock)
+    // Tools submenu
     static const int TOOLS_COUNT = 4;
     MenuItem toolsMenu[TOOLS_COUNT] = {
-        {"Key Tester", ITEM_APP, 0, -1},
-        {"GFX Test", ITEM_APP, 1, -1},
-        {"Stopwatch", ITEM_APP, 2, -1},
-        {"Clock", ITEM_APP, 3, -1}
+        {"Key Tester", ITEM_APP, APP_KEY_TESTER, -1},
+        {"GFX Test", ITEM_APP, APP_GFX_TEST, -1},
+        {"Stopwatch", ITEM_APP, APP_STOPWATCH, -1},
+        {"Clock", ITEM_APP, APP_CLOCK, -1}
     };
     
     // Files submenu
     static const int FILES_COUNT = 2;
     MenuItem filesMenu[FILES_COUNT] = {
-        {"File Browser", ITEM_APP, 4, -1},
-        {"Lua Runner", ITEM_APP, 5, -1}
+        {"File Browser", ITEM_APP, APP_FILE_BROWSER, -1},
+        {"Lua Runner", ITEM_APP, APP_LUA_RUNNER, -1}
     };
     
     // Navigation state

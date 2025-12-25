@@ -80,8 +80,8 @@ void MenuApp::handleInput(char key) {
         scrollOffset = state.scrollOffset;
     }
     
-    // ENTER (5) - select item
-    if (key == '5') {
+    // ENTER - select item
+    if (key == KEY_ENTER) {
         MenuItem* menu = getCurrentMenu();
         if (menu && selectedIndex < count) {
             MenuItem& item = menu[selectedIndex];
@@ -98,8 +98,8 @@ void MenuApp::handleInput(char key) {
         }
     }
     
-    // BACK (D) - go back to parent menu
-    if (key == 'D' && currentLevel == LEVEL_SUBMENU) {
+    // ESC - go back to parent menu
+    if (key == KEY_ESC && currentLevel == LEVEL_SUBMENU) {
         currentLevel = LEVEL_ROOT;
         currentSubmenu = -1;
         selectedIndex = 0;
@@ -136,8 +136,8 @@ void MenuApp::render() {
     
     // Footer hints
     if (currentLevel == LEVEL_ROOT) {
-        GUI::drawFooterHints("5:Open", "");
+        GUI::drawFooterHints("Enter:Open", "");
     } else {
-        GUI::drawFooterHints("5:Select", "D:Back");
+        GUI::drawFooterHints("Enter:Sel", "Esc:Back");
     }
 }

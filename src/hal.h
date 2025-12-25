@@ -14,7 +14,8 @@
 
 extern U8G2_ST7565_ERC12864_F_4W_HW_SPI u8g2;
 extern const uint8_t* FONT_SMALL; 
-extern int systemContrast; // Global system contrast variable
+extern int systemContrast;    // Global system contrast variable
+extern int systemBrightness;  // Global backlight brightness (0-255)
 
 // --------------------------------------------------------------------------
 // INPUT EXPORTS

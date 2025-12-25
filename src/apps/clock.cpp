@@ -1,6 +1,6 @@
 // [Revision: v1.0] [Path: src/apps/clock.cpp] [Date: 2025-12-11]
 // Description: Clock app for viewing and setting system time.
-// Controls: [5] Enter/Exit edit mode, [2/8] Adjust value, [4/6] Move field
+// Controls: [ENTER] Enter/Exit edit mode, [UP/DOWN] Adjust value, [LEFT/RIGHT] Move field
 
 #include "clock.h"
 #include "../gui.h"
@@ -45,7 +45,7 @@ void ClockApp::update() {
 void ClockApp::handleInput(char key) {
     if (!editMode) {
         // View mode
-        if (key == '5') {
+        if (key == KEY_ENTER) {
             // Enter edit mode
             editMode = true;
             editField = 0;
@@ -55,18 +55,18 @@ void ClockApp::handleInput(char key) {
         }
     } else {
         // Edit mode
-        if (key == '5') {
+        if (key == KEY_ENTER) {
             // Save and exit edit mode
             SystemClock::setTime(editHours, editMinutes, editSeconds);
             editMode = false;
         }
         
         // Move between fields
-        if (key == '4') {
+        if (key == KEY_LEFT) {
             editField--;
             if (editField < 0) editField = 2;
         }
-        if (key == '6') {
+        if (key == KEY_RIGHT) {
             editField++;
             if (editField > 2) editField = 0;
         }
@@ -82,18 +82,18 @@ void ClockApp::handleInput(char key) {
         }
         
         if (currentValue) {
-            if (key == '2') {
+            if (key == KEY_UP) {
                 (*currentValue)++;
                 if (*currentValue > maxValue) *currentValue = 0;
             }
-            if (key == '8') {
+            if (key == KEY_DOWN) {
                 (*currentValue)--;
                 if (*currentValue < 0) *currentValue = maxValue;
             }
         }
         
-        // Cancel with *
-        if (key == '*') {
+        // Cancel with ESC
+        if (key == KEY_ESC) {
             editMode = false;
         }
     }
@@ -147,8 +147,8 @@ void ClockApp::render() {
     
     // Footer
     if (editMode) {
-        GUI::drawFooterHints("2/8:Val 4/6:Fld", "5:Save");
+        GUI::drawFooterHints("^v:Val </>:Fld", "Enter");
     } else {
-        GUI::drawFooterHints("5:Edit", "D:Back");
+        GUI::drawFooterHints("Enter:Edit", "Esc:Back");
     }
 }

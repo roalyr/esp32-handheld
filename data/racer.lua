@@ -1,6 +1,6 @@
 -- Road Racer - Infinite branching roads
 -- Classic top-down chase view racing
--- Controls: 4=Left, 6=Right, 2=Brake, 8=Accelerate, *=Exit
+-- Controls: Left/Right=Steer, Down=Brake, Up=Accel, ESC=Exit
 
 math.randomseed(sys.millis())
 
@@ -259,7 +259,7 @@ local function renderGameOver()
     gfx.setFont(0)
     gfx.text(35, 35, "Score: " .. score)
     gfx.text(25, 48, "Dist: " .. distance .. "m")
-    gfx.text(20, 60, "Press 5 to restart")
+    gfx.text(10, 60, "Press Enter to restart")
     
     gfx.send()
 end
@@ -272,25 +272,25 @@ while running do
     input.scan()
     
     -- Exit
-    if input.pressed("*") or input.pressed("#") then
+    if input.pressed(input.KEY_ESC) then
         running = false
     end
     
     if not gameOver then
         -- Controls
-        if input.held("4") then
+        if input.held(input.KEY_LEFT) then
             car.lane = car.lane - 0.08
             if car.lane < 1 then car.lane = 1 end
         end
-        if input.held("6") then
+        if input.held(input.KEY_RIGHT) then
             car.lane = car.lane + 0.08
             if car.lane > 3 then car.lane = 3 end
         end
-        if input.held("8") then
+        if input.held(input.KEY_UP) then
             car.speed = car.speed + 0.1
             if car.speed > car.maxSpeed then car.speed = car.maxSpeed end
         end
-        if input.held("2") then
+        if input.held(input.KEY_DOWN) then
             car.speed = car.speed - 0.15
             if car.speed < car.minSpeed then car.speed = car.minSpeed end
         end
@@ -313,7 +313,7 @@ while running do
         -- Game over state
         renderGameOver()
         
-        if input.pressed("5") then
+        if input.pressed(input.KEY_ENTER) then
             -- Restart
             gameOver = false
             car.x = 64

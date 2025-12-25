@@ -1,5 +1,5 @@
 -- snake.lua - Classic Snake Game
--- Controls: 2=Up, 8=Down, 4=Left, 6=Right, 5=Restart
+-- Controls: Arrows=Move, Enter=Restart
 
 -- Constants
 local BLOCK = 4
@@ -46,17 +46,17 @@ local function handleInput()
     input.scan()
     
     if gameOver then
-        if input.pressed("5") then
+        if input.pressed(input.KEY_ENTER) then
             resetGame()
         end
         return
     end
     
     -- Direction changes (prevent 180 degree turns)
-    if input.pressed("2") and dirY == 0 then dirX, dirY = 0, -1 end
-    if input.pressed("8") and dirY == 0 then dirX, dirY = 0, 1 end
-    if input.pressed("4") and dirX == 0 then dirX, dirY = -1, 0 end
-    if input.pressed("6") and dirX == 0 then dirX, dirY = 1, 0 end
+    if input.pressed(input.KEY_UP) and dirY == 0 then dirX, dirY = 0, -1 end
+    if input.pressed(input.KEY_DOWN) and dirY == 0 then dirX, dirY = 0, 1 end
+    if input.pressed(input.KEY_LEFT) and dirX == 0 then dirX, dirY = -1, 0 end
+    if input.pressed(input.KEY_RIGHT) and dirX == 0 then dirX, dirY = 1, 0 end
 end
 
 local function updateGame()
@@ -115,7 +115,7 @@ local function drawGame()
         gfx.text(15, 25, "GAME OVER")
         gfx.setFont(0)
         gfx.text(35, 40, "Score: " .. score)
-        gfx.text(20, 55, "Press 5 to restart")
+        gfx.text(15, 55, "Press Enter restart")
     else
         -- Border
         gfx.rect(0, 0, gfx.width(), gfx.height())
@@ -145,7 +145,7 @@ local function drawGame()
 end
 
 -- Main game loop
-print("Snake started - Press * or # to exit")
+print("Snake started - Hold ESC to exit")
 resetGame()
 
 local running = true
@@ -155,7 +155,7 @@ while running do
     drawGame()
     
     -- Check for exit
-    if input.held("*") or input.held("#") then
+    if input.held(input.KEY_ESC) then
         running = false
     end
     

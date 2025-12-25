@@ -32,11 +32,11 @@ void YesNoPromptApp::stop() {}
 void YesNoPromptApp::update() {}
 
 void YesNoPromptApp::handleInput(char key) {
-    // Use 4/6 for left/right selection, 5 to confirm, D to cancel
-    if (key == '4') selection = true;
-    if (key == '6') selection = false;
+    // Use LEFT/RIGHT for selection, ENTER to confirm, ESC to cancel
+    if (key == KEY_LEFT) selection = true;
+    if (key == KEY_RIGHT) selection = false;
     
-    if (key == 'D') {
+    if (key == KEY_ESC) {
         // Cancel and return false
         appTransferBool = false;
         active = false;
@@ -48,7 +48,7 @@ void YesNoPromptApp::handleInput(char key) {
         return;
     }
 
-    if (key == '5') {
+    if (key == KEY_ENTER) {
         appTransferBool = selection;
         active = false;
         App* ret = caller;

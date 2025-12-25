@@ -371,11 +371,11 @@ void navigateDown(ScrollState& state, bool wrap) {
 }
 
 bool handleListNavigation(ScrollState& state, char key) {
-    if (key == '2') {
+    if (key == KEY_UP) {
         navigateUp(state);
         return true;
     }
-    if (key == '8') {
+    if (key == KEY_DOWN) {
         navigateDown(state);
         return true;
     }

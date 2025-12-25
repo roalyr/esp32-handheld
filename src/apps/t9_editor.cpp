@@ -8,19 +8,18 @@
 const char* HELP_TEXT =
     "CONTROLS:\n"
     "2-9: Type\n"
-    "#: Space\n"
-    "*: Shift\n"
-    "Z: Newline\n"
-    "M: Backspace\n"
-    "5: Confirm (when prompted)\n"
+    "0: Space\n"
+    "Shift: Caps\n"
+    "Tab: Newline\n"
+    "Bksp: Delete\n"
+    "Enter: Confirm\n"
     "\n"
     "NAV:\n"
-    "A/X: Left/Right\n"
-    "B/Y: Up/Down\n"
+    "Arrows: Move\n"
     "\n"
     "SYSTEM:\n"
-    "C: Help\n"
-    "D: Exit\n";
+    "Alt: Help\n"
+    "Esc: Exit\n";
 
 T9EditorApp::T9EditorApp() {
     scrollOffset = 0;
@@ -71,21 +70,21 @@ void T9EditorApp::handleInput(char key) {
 
     // --- 2. HELP POPUP HANDLING ---
     if (currentState == STATE_HELP) {
-        if (key == 'C') currentState = STATE_EDITING; 
-        if (key == '2') helpScrollY += 5; 
-        if (key == '8') helpScrollY -= 5; 
+        if (key == KEY_ALT) currentState = STATE_EDITING; 
+        if (key == KEY_UP) helpScrollY += 5; 
+        if (key == KEY_DOWN) helpScrollY -= 5; 
         if (helpScrollY > 0) helpScrollY = 0; 
         return;
     }
 
     // --- 3. EDITOR HANDLING ---
-    if (key == 'C') {
+    if (key == KEY_ALT) {
         currentState = STATE_HELP;
         helpScrollY = 0;
         return;
     }
     
-    if (key == 'D') {
+    if (key == KEY_ESC) {
         // Signal exit requested. If this editor was opened as a filename/content
         // transfer target, the caller will be returned to by main loop.
         // Save buffer to transfer area so the caller can read it.
@@ -94,10 +93,10 @@ void T9EditorApp::handleInput(char key) {
         return;
     }
 
-    if (key == 'A') { engine.moveCursor(-1); return; }
-    if (key == 'X') { engine.moveCursor(1); return; }
-    if (key == 'B') { moveCursorVertically(-1); return; }
-    if (key == 'Y') { moveCursorVertically(1); return; }
+    if (key == KEY_LEFT) { engine.moveCursor(-1); return; }
+    if (key == KEY_RIGHT) { engine.moveCursor(1); return; }
+    if (key == KEY_UP) { moveCursorVertically(-1); return; }
+    if (key == KEY_DOWN) { moveCursorVertically(1); return; }
 
     // If in read-only mode, ignore typing keys and only allow navigation and exit
     if (readOnly) {

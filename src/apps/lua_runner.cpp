@@ -5,6 +5,7 @@
 #include "../hal.h"
 #include "../gui.h"
 #include "../lua_vm.h"
+#include "../config.h"
 #include <SPIFFS.h>
 
 extern "C" {
@@ -119,7 +120,7 @@ void LuaRunnerApp::drawBrowser() {
         }
     }
     
-    GUI::drawFooterHints("5:Run", "D:Back");
+    GUI::drawFooterHints("Enter:Run", "Esc:Back");
 }
 
 void LuaRunnerApp::drawRunning() {
@@ -131,7 +132,7 @@ void LuaRunnerApp::drawRunning() {
     name = GUI::truncateString(name, 20);
     u8g2.drawStr(2, 24, name.c_str());
     
-    u8g2.drawStr(2, 40, "Press * or # to exit");
+    u8g2.drawStr(2, 40, "Press ESC to exit");
     
     // Memory usage
     char memStr[32];
@@ -200,15 +201,15 @@ void LuaRunnerApp::handleInput(char key) {
                 break;
             }
             
-            if (key == '5' && fileCount > 0) {
+            if (key == KEY_ENTER && fileCount > 0) {
                 runSelectedScript();
             }
             break;
         }
             
         case RUNNING:
-            // Allow exiting with * or #
-            if (key == '*' || key == '#') {
+            // Allow exiting with ESC or BKSP
+            if (key == KEY_ESC || key == KEY_BKSP) {
                 mode = BROWSE;
                 LuaVM::collectGarbage();
             }

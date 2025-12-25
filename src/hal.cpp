@@ -1,42 +1,56 @@
-// [Revision: v2.2] [Path: src/hal.cpp] [Date: 2025-12-11]
-// Description: Added key repeat support for non-T9 navigation keys.
+//
+// PROJECT: ESP32-S3-N16-R8 handheld terminal
+// MODULE: src/hal.cpp
+// STATUS: [Level 2 - Implementation]
+// TRUTH_LINK: TRUTH_GPIO_PINS_ASSIGNEMNT.md Section 2
+// LOG_REF: 2025-12-25
+//
 
 #include "hal.h"
 #include <FS.h>
 #include <SPIFFS.h>
 #include <SD.h>
+#include <SPI.h>
+
+// --------------------------------------------------------------------------
+// SPI PIN DEFINITIONS (per TRUTH_GPIO_PINS_ASSIGNEMNT.md Section 1)
+// --------------------------------------------------------------------------
+
+#define PIN_SPI_SCK  12
+#define PIN_SPI_MOSI 11
 
 // --------------------------------------------------------------------------
 // DISPLAY OBJECTS
 // --------------------------------------------------------------------------
 
-U8G2_ST7565_ERC12864_F_4W_HW_SPI u8g2(U8G2_R0, PIN_CS, PIN_DC, PIN_RST);
+U8G2_ST7565_ERC12864_F_4W_HW_SPI u8g2(U8G2_R2, PIN_CS, PIN_DC, PIN_RST);
 const uint8_t* FONT_SMALL = u8g2_font_5x7_t_cyrillic;
 
 // Global Settings
 int systemContrast = DEFAULT_CONTRAST;
+int systemBrightness = 255;  // Default full brightness (0-255)
 
 // --------------------------------------------------------------------------
 // INPUT MATRIX CONFIG
 // --------------------------------------------------------------------------
 
 byte rowPins[ROWS] = {42, 41, 40, 39};
-byte colPins[COLS] = {1, 2, 6, 7, 15}; 
+byte colPins[COLS] = {1, 2, 45, 44, 43}; 
 
 char keyMap[ROWS][COLS] = {
-  {'*','0','#','D', 'M'}, 
-  {'7','8','9','C', 'Z'}, 
-  {'4','5','6','B', 'Y'}, 
-  {'1','2','3','A', 'X'}  
+  {KEY_ESC,  '1',      '2',      '3',       KEY_BKSP },
+  {KEY_TAB,  '4',      '5',      '6',       KEY_ENTER},
+  {KEY_SHIFT,'7',      '8',      '9',       KEY_UP   },
+  {KEY_ALT,  KEY_LEFT, '0',      KEY_RIGHT, KEY_DOWN }
 };
 
 // Repeatable key flags - mirrors keyMap layout
 // true = key will auto-repeat when held (non-T9 keys only)
 bool keyRepeatMap[ROWS][COLS] = {
-  {false, false, false, true,  true },  // *, 0, #, D, M
-  {false, false, false, true,  true },  // 7, 8, 9, C, Z
-  {false, false, false, true,  true },  // 4, 5, 6, B, Y
-  {false, false, false, true,  true }   // 1, 2, 3, A, X
+  {false, false, false, false, true },  // ESC, 1, 2, 3, BKSP
+  {false, false, false, false, false},  // TAB, 4, 5, 6, ENTER
+  {false, false, false, false, true },  // SHIFT, 7, 8, 9, UP
+  {false, true,  false, true,  true }   // ALT, LEFT, 0, RIGHT, DOWN
 };
 
 char activeKeys[MAX_PRESSED_KEYS];
@@ -62,6 +76,14 @@ static int repeatStateCount = 0;
 void setupHardware() {
   for(int i=0; i<ROWS; i++) pinMode(rowPins[i], INPUT_PULLUP);
   for(int i=0; i<COLS; i++) pinMode(colPins[i], INPUT);
+
+  // Configure backlight with PWM for brightness control
+  ledcSetup(0, 5000, 8);         // Channel 0, 5kHz, 8-bit resolution
+  ledcAttachPin(PIN_BACKLIGHT, 0);
+  ledcWrite(0, systemBrightness);
+
+  // Initialize SPI with custom pins (SCK=12, MOSI=11) per TRUTH
+  SPI.begin(PIN_SPI_SCK, -1, PIN_SPI_MOSI, -1);
 
   u8g2.begin();
   u8g2.setContrast(systemContrast); // Apply global default

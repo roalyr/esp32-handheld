@@ -1,6 +1,6 @@
 -- Elite-style Space Trading Game
 -- Classic wireframe 3D, trading, combat
--- Controls shown on each screen
+-- Controls: Arrows=Navigate, Enter=Select, ESC=Exit
 
 -- Game state
 local state = "docked" -- docked, flying, trade, equip, galmap, status, hyperspace, gameover
@@ -206,9 +206,9 @@ end
 local dock_menu = {"Launch", "Trade", "Equip", "GalMap", "Status"}
 
 local function updateDocked()
-  if input.pressed("2") then menu_sel = math.max(1, menu_sel - 1)
-  elseif input.pressed("8") then menu_sel = math.min(#dock_menu, menu_sel + 1)
-  elseif input.pressed("5") then
+  if input.pressed(input.KEY_UP) then menu_sel = math.max(1, menu_sel - 1)
+  elseif input.pressed(input.KEY_DOWN) then menu_sel = math.min(#dock_menu, menu_sel + 1)
+  elseif input.pressed(input.KEY_ENTER) then
     if menu_sel == 1 then
       state = "flying"
       px, py, pz = 0, 0, -400
@@ -241,18 +241,18 @@ end
 
 -- FLYING STATE
 local function updateFlying()
-  if input.held("2") then pitch = pitch - 0.04 end
-  if input.held("8") then pitch = pitch + 0.04 end
-  if input.held("4") then yaw = yaw + 0.04 end
-  if input.held("6") then yaw = yaw - 0.04 end
-  if input.held("A") then speed = math.min(MAX_SPEED, speed + 0.3) end
-  if input.held("B") then speed = math.max(0, speed - 0.3) end
+  if input.held(input.KEY_UP) then pitch = pitch - 0.04 end
+  if input.held(input.KEY_DOWN) then pitch = pitch + 0.04 end
+  if input.held(input.KEY_LEFT) then yaw = yaw + 0.04 end
+  if input.held(input.KEY_RIGHT) then yaw = yaw - 0.04 end
+  if input.held("1") then speed = math.min(MAX_SPEED, speed + 0.3) end
+  if input.held("3") then speed = math.max(0, speed - 0.3) end
   
   px = px + math.sin(yaw) * speed
   pz = pz + math.cos(yaw) * speed
   
   -- Fire laser
-  if input.pressed("5") and laser_temp < 70 then
+  if input.pressed(input.KEY_ENTER) and laser_temp < 70 then
     laser_temp = laser_temp + 12
     for i, e in ipairs(enemies) do
       local sx, sy, _ = project(e.x, e.y, e.z)
@@ -268,7 +268,7 @@ local function updateFlying()
   end
   
   -- Fire missile
-  if input.pressed("M") and missiles > 0 and #enemies > 0 then
+  if input.pressed("2") and missiles > 0 and #enemies > 0 then
     missiles = missiles - 1
     enemies[1].hull = enemies[1].hull - 45
     if enemies[1].hull <= 0 then
@@ -281,7 +281,7 @@ local function updateFlying()
   
   -- Dock
   local dist = math.sqrt(px*px + py*py + pz*pz)
-  if dist < 60 and speed < 5 and input.pressed("D") then
+  if dist < 60 and speed < 5 and input.pressed("0") then
     state = "docked"
     menu_sel = 1
   end
@@ -307,7 +307,7 @@ local function updateFlying()
   end
   
   -- Galaxy map
-  if input.pressed("C") then
+  if input.pressed(input.KEY_TAB) then
     state = "galmap"
     galmap_cursor = current_sys
   end
@@ -329,11 +329,11 @@ end
 
 -- TRADE STATE
 local function updateTrade()
-  if input.pressed("2") then trade_sel = math.max(1, trade_sel - 1)
-  elseif input.pressed("8") then trade_sel = math.min(#commodities, trade_sel + 1)
-  elseif input.pressed("4") or input.pressed("6") then
+  if input.pressed(input.KEY_UP) then trade_sel = math.max(1, trade_sel - 1)
+  elseif input.pressed(input.KEY_DOWN) then trade_sel = math.min(#commodities, trade_sel + 1)
+  elseif input.pressed(input.KEY_LEFT) or input.pressed(input.KEY_RIGHT) then
     trade_mode = trade_mode == "buy" and "sell" or "buy"
-  elseif input.pressed("5") then
+  elseif input.pressed(input.KEY_ENTER) then
     local c = commodities[trade_sel]
     local price = getPrice(trade_sel)
     if trade_mode == "buy" then
@@ -347,7 +347,7 @@ local function updateTrade()
         cargo[c.name] = cargo[c.name] - 1
       end
     end
-  elseif input.pressed("B") then state = "docked" end
+  elseif input.pressed(input.KEY_ESC) then state = "docked" end
 end
 
 local function drawTrade()
@@ -376,19 +376,19 @@ end
 
 -- EQUIP STATE
 local function updateEquip()
-  if input.pressed("5") then
+  if input.pressed(input.KEY_ENTER) then
     local need = MAX_FUEL - fuel
     local cost = math.floor(need * 5)
     if credits >= cost and need > 0.1 then
       credits = credits - cost
       fuel = MAX_FUEL
     end
-  elseif input.pressed("M") then
+  elseif input.pressed("2") then
     if credits >= 30 and missiles < 4 then
       credits = credits - 30
       missiles = missiles + 1
     end
-  elseif input.pressed("B") then state = "docked" end
+  elseif input.pressed(input.KEY_ESC) then state = "docked" end
 end
 
 local function drawEquip()
@@ -397,19 +397,19 @@ local function drawEquip()
   gfx.text(85, 7, credits .. "CR")
   gfx.text(2, 20, "Fuel: " .. string.format("%.1f", fuel) .. "/" .. MAX_FUEL)
   local need = MAX_FUEL - fuel
-  gfx.text(2, 30, "[5] Refuel " .. math.floor(need * 5) .. "CR")
+  gfx.text(2, 30, "[OK] Refuel " .. math.floor(need * 5) .. "CR")
   gfx.text(2, 44, "Missiles: " .. missiles .. "/4")
-  gfx.text(2, 54, "[M] Buy +1 = 30CR")
+  gfx.text(2, 54, "[2] Buy +1 = 30CR")
   gfx.send()
 end
 
 -- GALMAP STATE
 local function updateGalmap()
-  if input.pressed("2") then galmap_cursor = math.max(1, galmap_cursor - 1)
-  elseif input.pressed("8") then galmap_cursor = math.min(NUM_SYSTEMS, galmap_cursor + 1)
-  elseif input.pressed("4") then galmap_cursor = math.max(1, galmap_cursor - 4)
-  elseif input.pressed("6") then galmap_cursor = math.min(NUM_SYSTEMS, galmap_cursor + 4)
-  elseif input.pressed("5") then
+  if input.pressed(input.KEY_UP) then galmap_cursor = math.max(1, galmap_cursor - 1)
+  elseif input.pressed(input.KEY_DOWN) then galmap_cursor = math.min(NUM_SYSTEMS, galmap_cursor + 1)
+  elseif input.pressed(input.KEY_LEFT) then galmap_cursor = math.max(1, galmap_cursor - 4)
+  elseif input.pressed(input.KEY_RIGHT) then galmap_cursor = math.min(NUM_SYSTEMS, galmap_cursor + 4)
+  elseif input.pressed(input.KEY_ENTER) then
     if galmap_cursor ~= current_sys then
       local d = systemDist(current_sys, galmap_cursor)
       if d <= fuel then
@@ -421,7 +421,7 @@ local function updateGalmap()
         spawnObjects()
       end
     end
-  elseif input.pressed("B") then state = "docked" end
+  elseif input.pressed(input.KEY_ESC) then state = "docked" end
 end
 
 local function drawGalmap()
@@ -446,7 +446,7 @@ end
 
 -- STATUS STATE
 local function updateStatus()
-  if input.pressed("B") or input.pressed("5") then state = "docked" end
+  if input.pressed(input.KEY_ESC) or input.pressed(input.KEY_ENTER) then state = "docked" end
 end
 
 local function drawStatus()
@@ -482,7 +482,7 @@ end
 
 -- GAMEOVER STATE
 local function updateGameover()
-  if input.pressed("5") then
+  if input.pressed(input.KEY_ENTER) then
     credits = 100
     fuel = 7.0
     hull = 100
@@ -499,12 +499,12 @@ local function drawGameover()
   gfx.clear()
   gfx.text(30, 25, "GAME OVER")
   gfx.text(20, 38, "Score: " .. credits .. "CR")
-  gfx.text(20, 50, "[5] Restart")
+  gfx.text(20, 50, "[Enter] Restart")
   gfx.send()
 end
 
 -- MAIN LOOP
-print("Elite started - * or # to exit")
+print("Elite started - Hold ESC to exit")
 generateGalaxy()
 
 local running = true
@@ -533,8 +533,8 @@ while running do
   elseif state == "gameover" then drawGameover()
   end
   
-  -- Exit check
-  if input.held("*") or input.held("#") then
+  -- Exit check (only from docked)
+  if state == "docked" and input.held(input.KEY_ESC) then
     running = false
   end
   

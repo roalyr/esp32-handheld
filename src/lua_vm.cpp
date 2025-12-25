@@ -225,6 +225,20 @@ static void registerInputModule(lua_State* L) {
     };
     
     luaL_newlib(L, input_funcs);
+    
+    // Add key constants as input.KEY_* for new keyboard layout
+    // Special keys use ASCII control codes to avoid conflicts
+    lua_pushstring(L, "\x1b"); lua_setfield(L, -2, "KEY_ESC");    // 27 = ESC
+    lua_pushstring(L, "\x08"); lua_setfield(L, -2, "KEY_BKSP");   // 8 = Backspace
+    lua_pushstring(L, "\x09"); lua_setfield(L, -2, "KEY_TAB");    // 9 = Tab
+    lua_pushstring(L, "\x0d"); lua_setfield(L, -2, "KEY_ENTER");  // 13 = Enter/CR
+    lua_pushstring(L, "\x0e"); lua_setfield(L, -2, "KEY_SHIFT");  // 14 = Shift
+    lua_pushstring(L, "\x0f"); lua_setfield(L, -2, "KEY_ALT");    // 15 = Alt
+    lua_pushstring(L, "\x10"); lua_setfield(L, -2, "KEY_UP");     // 16 = Up arrow
+    lua_pushstring(L, "\x11"); lua_setfield(L, -2, "KEY_DOWN");   // 17 = Down arrow
+    lua_pushstring(L, "\x12"); lua_setfield(L, -2, "KEY_LEFT");   // 18 = Left arrow
+    lua_pushstring(L, "\x13"); lua_setfield(L, -2, "KEY_RIGHT");  // 19 = Right arrow
+    
     lua_setglobal(L, "input");
 }
 

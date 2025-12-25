@@ -170,8 +170,8 @@ void loop() {
             // Reset activity timer on any input
             lastActivityTime = now;
             
-            // GLOBAL HOME KEY EXCEPTION (D key - no repeat for menu navigation)
-            if (key == 'D' && isJustPressed(key)) {
+            // GLOBAL HOME KEY EXCEPTION (ESC key - no repeat for menu navigation)
+            if (key == KEY_ESC && isJustPressed(key)) {
                  // If we are in T9 Editor, let the app handle it (for popup)
                  if (currentApp == &appT9Editor) {
                      currentApp->handleInput(key);

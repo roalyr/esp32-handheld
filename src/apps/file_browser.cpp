@@ -317,7 +317,7 @@ void FileBrowserApp::handleInput(char key) {
 }
 
 void FileBrowserApp::handleLuaRunningInput(char key) {
-    if (key == '*' || key == '#') {
+    if (key == KEY_ESC) {
         browserMode = BROWSE_MODE;
         currentLuaScript = "";
     }
@@ -343,7 +343,7 @@ void FileBrowserApp::handleBrowseInput(char key) {
     }
 
     // Open context menu
-    if (key == '5' && selectedIndex < (int)fileList.size()) {
+    if (key == KEY_ENTER && selectedIndex < (int)fileList.size()) {
         openFileContextMenu();
         return;
     }
@@ -358,10 +358,10 @@ void FileBrowserApp::handleMenuInput(char key) {
     int maxIndex = getMenuItemCount() - 1;
     
     switch (key) {
-        case 'D': closeMenu(); break;
-        case '2': menuSelectedIndex = max(0, menuSelectedIndex - 1); break;
-        case '8': menuSelectedIndex = min(maxIndex, menuSelectedIndex + 1); break;
-        case '5': handleFileAction(menuSelectedIndex); break;
+        case KEY_ESC: closeMenu(); break;
+        case KEY_UP: menuSelectedIndex = max(0, menuSelectedIndex - 1); break;
+        case KEY_DOWN: menuSelectedIndex = min(maxIndex, menuSelectedIndex + 1); break;
+        case KEY_ENTER: handleFileAction(menuSelectedIndex); break;
     }
 }
 
@@ -385,7 +385,7 @@ void FileBrowserApp::renderLuaRunning() {
     if (name.startsWith("/")) name = name.substring(1);
     name = GUI::truncateString(name, 20);
     u8g2.drawStr(2, 24, name.c_str());
-    u8g2.drawStr(2, 40, "Press * or # to exit");
+    u8g2.drawStr(2, 40, "Press ESC to exit");
     
     char memStr[32];
     snprintf(memStr, sizeof(memStr), "Mem: %d KB", (int)(LuaVM::getMemoryUsage() / 1024));

@@ -1,6 +1,6 @@
 -- 3D Maze (Siemens C35 style)
 -- Raycasting engine for 128x64 display
--- Controls: 2=Forward, 8=Back, 4=Left, 6=Right, *=Exit
+-- Controls: Up=Forward, Down=Back, Left/Right=Turn, ESC=Exit
 
 -- Player position and direction
 local px, py = 1.5, 1.5  -- Start position
@@ -143,21 +143,21 @@ while running do
     input.scan()
     
     -- Turn left/right
-    if input.held("4") then
+    if input.held(input.KEY_LEFT) then
         pa = pa - turnSpeed
     end
-    if input.held("6") then
+    if input.held(input.KEY_RIGHT) then
         pa = pa + turnSpeed
     end
     
     -- Move forward/backward
     local newX, newY = px, py
     
-    if input.held("2") then
+    if input.held(input.KEY_UP) then
         newX = px + math.cos(pa) * moveSpeed
         newY = py + math.sin(pa) * moveSpeed
     end
-    if input.held("8") then
+    if input.held(input.KEY_DOWN) then
         newX = px - math.cos(pa) * moveSpeed
         newY = py - math.sin(pa) * moveSpeed
     end
@@ -167,7 +167,7 @@ while running do
     if not isWall(px, newY) then py = newY end
     
     -- Exit
-    if input.pressed("*") or input.pressed("#") then
+    if input.pressed(input.KEY_ESC) then
         running = false
     end
     

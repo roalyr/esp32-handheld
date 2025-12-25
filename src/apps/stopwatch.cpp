@@ -1,6 +1,6 @@
 // [Revision: v2.0] [Path: src/apps/stopwatch.cpp] [Date: 2025-12-11]
 // Description: Stopwatch app - refactored to use unified GUI module.
-// Controls: [5] Toggle Start/Stop, [0] Reset (when stopped).
+// Controls: [ENTER] Toggle Start/Stop, [0] Reset (when stopped).
 
 #include "stopwatch.h"
 #include "../gui.h"
@@ -34,7 +34,7 @@ void StopwatchApp::update() {
 }
 
 void StopwatchApp::handleInput(char key) {
-    if (key == '5') {
+    if (key == KEY_ENTER) {
         if (isRunning) {
             // PAUSE: Save the elapsed time
             accumulatedTime += (millis() - startTime);
@@ -74,8 +74,8 @@ void StopwatchApp::render() {
     
     // Draw Controls
     if (isRunning) {
-        GUI::drawFooter("[5] PAUSE");
+        GUI::drawFooter("[Enter] PAUSE");
     } else {
-        GUI::drawFooterHints("[5] RESUME", "[0] RESET");
+        GUI::drawFooterHints("[Enter] GO", "[0] RESET");
     }
 }

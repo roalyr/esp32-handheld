@@ -1,5 +1,5 @@
 -- asteroids.lua - Classic Asteroids Game
--- Controls: 4=Left, 6=Right, 2=Thrust, 5=Fire, 5=Restart(gameover)
+-- Controls: Left/Right=Turn, Up=Thrust, Enter=Fire/Restart
 
 -- Constants
 local SCREEN_W, SCREEN_H = gfx.width(), gfx.height()
@@ -107,25 +107,25 @@ local function handleInput()
     input.scan()
     
     if gameOver then
-        if input.pressed("5") then
+        if input.pressed(input.KEY_ENTER) then
             resetGame()
         end
         return
     end
     
     -- Rotation
-    if input.held("4") then shipAngle = shipAngle - ROT_SPEED end
-    if input.held("6") then shipAngle = shipAngle + ROT_SPEED end
+    if input.held(input.KEY_LEFT) then shipAngle = shipAngle - ROT_SPEED end
+    if input.held(input.KEY_RIGHT) then shipAngle = shipAngle + ROT_SPEED end
     
     -- Thrust
-    isThrusting = input.held("2")
+    isThrusting = input.held(input.KEY_UP)
     if isThrusting then
         shipVX = shipVX + math.cos(shipAngle) * ACCEL
         shipVY = shipVY + math.sin(shipAngle) * ACCEL
     end
     
     -- Fire
-    if input.pressed("5") then
+    if input.pressed(input.KEY_ENTER) then
         fireBullet()
     end
 end
@@ -257,7 +257,7 @@ local function drawGame()
         gfx.text(15, 25, "GAME OVER")
         gfx.setFont(0)
         gfx.text(35, 40, "Score: " .. score)
-        gfx.text(20, 55, "Press 5 to restart")
+        gfx.text(10, 55, "Press Enter restart")
     else
         -- Border
         gfx.rect(0, 0, SCREEN_W, SCREEN_H)
@@ -295,7 +295,7 @@ local function drawGame()
 end
 
 -- Main loop
-print("Asteroids started - Press * or # to exit")
+print("Asteroids started - Hold ESC to exit")
 resetGame()
 
 local running = true
@@ -304,7 +304,7 @@ while running do
     updateGame()
     drawGame()
     
-    if input.held("*") or input.held("#") then
+    if input.held(input.KEY_ESC) then
         running = false
     end
     

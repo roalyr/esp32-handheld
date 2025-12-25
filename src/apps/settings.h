@@ -10,6 +10,7 @@ class SettingsApp : public App {
   private:
     enum SettingItem {
         SETTING_CONTRAST = 0,
+        SETTING_BRIGHTNESS,
         SETTING_SLEEP,
         SETTING_INFO,
         SETTING_COUNT
@@ -20,6 +21,7 @@ class SettingsApp : public App {
     
     // Editable values
     int tempContrast;
+    int tempBrightness;
     bool tempSleepEnabled;
 
   public:

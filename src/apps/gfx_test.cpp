@@ -42,17 +42,17 @@ void GfxTestApp::stop() {
 }
 
 void GfxTestApp::handleInput(char key) {
-    // Switch modes with 5
-    if (key == '5') {
+    // Switch modes with Enter
+    if (key == KEY_ENTER) {
         testMode = (testMode + 1) % 2;
     }
     
-    // In ghosting mode, 2/8 changes speed
+    // In ghosting mode, UP/DOWN changes speed
     if (testMode == 1) {
-        if (key == '2' && ballSpeed > 0) {
+        if (key == KEY_UP && ballSpeed > 0) {
             ballSpeed--;
         }
-        if (key == '8' && ballSpeed < 2) {
+        if (key == KEY_DOWN && ballSpeed < 2) {
             ballSpeed++;
         }
     }
@@ -127,7 +127,7 @@ void GfxTestApp::render() {
             }
         }
         
-        GUI::drawFooterHints("5:Mode", "D:Back");
+        GUI::drawFooterHints("Enter:Mode", "Esc:Back");
         
     } else {
         // GHOSTING TEST MODE
@@ -142,6 +142,6 @@ void GfxTestApp::render() {
         int contentHeight = GUI::SCREEN_HEIGHT - GUI::HEADER_HEIGHT - GUI::FOOTER_HEIGHT;
         u8g2.drawFrame(0, contentTop, GUI::SCREEN_WIDTH, contentHeight);
         
-        GUI::drawFooterHints("2/8:Spd 5:Mode", "D:Back");
+        GUI::drawFooterHints("^v:Spd Enter:Mode", "Esc");
     }
 }

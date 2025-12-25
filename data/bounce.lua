@@ -7,9 +7,9 @@ local radius = 5
 local running = true
 
 print("Bounce demo started")
-print("Press any key to exit")
+print("Press ESC to exit")
 
--- Main loop - runs until user presses a key
+-- Main loop - runs until user presses ESC
 local startTime = sys.millis()
 local frameCount = 0
 
@@ -50,7 +50,7 @@ while running do
     
     -- Check for exit
     input.scan()
-    if input.anyPressed() then
+    if input.pressed(input.KEY_ESC) then
         running = false
     end
     

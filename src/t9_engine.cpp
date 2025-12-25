@@ -116,8 +116,8 @@ void T9Engine::setCursor(int pos) {
 void T9Engine::handleInput(char key) {
   unsigned long now = millis();
 
-  // BACKSPACE (M)
-  if (key == 'M') { 
+  // BACKSPACE
+  if (key == KEY_BKSP) { 
     if (pendingCommit) {
         pendingCommit = false;
     } else if (cursorPos > 0) {
@@ -132,24 +132,19 @@ void T9Engine::handleInput(char key) {
     return;
   }
   
-  // NEWLINE (Z)
-  if (key == 'Z') {
+  // NEWLINE (TAB key)
+  if (key == KEY_TAB) {
     if (pendingCommit) commit();
     textBuffer = textBuffer.substring(0, cursorPos) + "\n" + textBuffer.substring(cursorPos);
     cursorPos++;
     return;
   }
   
-  // SPACE (#)
-  if (key == '#') {
-      if (pendingCommit) commit();
-      textBuffer = textBuffer.substring(0, cursorPos) + " " + textBuffer.substring(cursorPos);
-      cursorPos++;
-      return;
-  }
+  // SPACE (0 key - first option in cycle)
+  // Note: 0 key cycles through space and 0, space is default
   
-  // SHIFT (*)
-  if (key == '*') { 
+  // SHIFT
+  if (key == KEY_SHIFT) { 
     isShifted = !isShifted;
     return;
   }

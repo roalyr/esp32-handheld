@@ -4,6 +4,23 @@
 #include "key_tester.h"
 #include "../gui.h"
 
+// Helper to get readable name for special keys
+static const char* getKeyName(char key) {
+    switch(key) {
+        case KEY_ESC:   return "ESC";
+        case KEY_BKSP:  return "BKSP";
+        case KEY_TAB:   return "TAB";
+        case KEY_ENTER: return "ENTR";
+        case KEY_SHIFT: return "SHFT";
+        case KEY_ALT:   return "ALT";
+        case KEY_UP:    return "UP";
+        case KEY_DOWN:  return "DOWN";
+        case KEY_LEFT:  return "LEFT";
+        case KEY_RIGHT: return "RGHT";
+        default:        return nullptr;  // Regular key
+    }
+}
+
 KeyTesterApp::KeyTesterApp() {
     lastPressedKey = ' ';
     for(int i=0; i<HISTORY_SIZE; i++) keyHistory[i] = ' ';
@@ -31,27 +48,39 @@ void KeyTesterApp::handleInput(char key) {
 }
 
 void KeyTesterApp::render() {
-    // Header with history
+    GUI::drawHeader("KEY TESTER");
     GUI::setFontSmall();
-    u8g2.drawFrame(0, 0, GUI::SCREEN_WIDTH, 15);
-    u8g2.drawUTF8(2, 10, keyHistory);
 
     // Last Key Display
-    u8g2.drawUTF8(0, 28, "LAST PRESSED:");
+    u8g2.drawUTF8(0, 24, "LAST:");
     if (lastPressedKey != ' ') {
-        u8g2.setFont(u8g2_font_inr24_t_cyrillic);
-        char keyStr[2] = {lastPressedKey, '\0'}; 
-        u8g2.drawUTF8(50, 58, keyStr);
+        const char* name = getKeyName(lastPressedKey);
+        if (name) {
+            // Special key - show name
+            u8g2.setFont(u8g2_font_ncenB14_tr);
+            u8g2.drawStr(35, 38, name);
+        } else {
+            // Regular key (digit) - show large
+            u8g2.setFont(u8g2_font_inr24_t_cyrillic);
+            char keyStr[2] = {lastPressedKey, '\0'}; 
+            u8g2.drawUTF8(50, 42, keyStr);
+        }
     }
     
     // Currently Held Keys
     GUI::setFontSmall();
-    u8g2.drawUTF8(0, 63, "HELD:");
-    int xPos = 25;
+    u8g2.drawUTF8(0, 55, "HELD:");
+    int xPos = 28;
     
     for(int i=0; i<activeKeyCount; i++) {
-       char buf[4] = {'[', activeKeys[i], ']', '\0'};
-       u8g2.drawStr(xPos, 63, buf);
-       xPos += 15;
+        const char* name = getKeyName(activeKeys[i]);
+        if (name) {
+            u8g2.drawStr(xPos, 55, name);
+            xPos += u8g2.getStrWidth(name) + 3;
+        } else {
+            char buf[4] = {'[', activeKeys[i], ']', '\0'};
+            u8g2.drawStr(xPos, 55, buf);
+            xPos += 15;
+        }
     }
 }

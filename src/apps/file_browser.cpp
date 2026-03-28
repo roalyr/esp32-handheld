@@ -9,8 +9,6 @@
 #include "yes_no_prompt.h"
 #include "../apps/t9_editor.h"
 #include "../lua_vm.h"
-#include <FS.h>
-#include <SPIFFS.h>
 #include <algorithm>
 
 extern T9EditorApp appT9Editor;
@@ -41,7 +39,7 @@ void FileBrowserApp::resetState() {
 
 void FileBrowserApp::start() {
     u8g2.setContrast(systemContrast);
-    spiffsAvailable = SPIFFS.totalBytes() > 0;
+    spiffsAvailable = false;  // No filesystem (SPIFFS disabled, SD card not wired)
 
     // Process any pending app transfer actions
     if (processPendingActions()) {
@@ -74,9 +72,7 @@ bool FileBrowserApp::processPendingActions() {
 
 bool FileBrowserApp::handleDeleteReturn() {
     if (appTransferBool && appTransferPath.length() > 0) {
-        if (!SPIFFS.remove(appTransferPath)) {
-            showMessage("Delete failed", 2000);
-        }
+        showMessage("No filesystem", 2000);
     }
     clearTransferState();
     return false;
@@ -139,28 +135,7 @@ void FileBrowserApp::scanDirectory(const String& path) {
     selectedIndex = 0;
     scrollOffset = 0;
     menuState = MENU_CLOSED;
-
-    File dir = SPIFFS.open(path);
-    if (!dir || !dir.isDirectory()) return;
-
-    File file = dir.openNextFile();
-    while (file) {
-        if (!file.isDirectory()) {
-            FileEntry entry;
-            String full = String(file.name());
-            int lastSlash = full.lastIndexOf('/');
-            entry.name = (lastSlash >= 0) ? full.substring(lastSlash + 1) : full;
-            entry.isDir = false;
-            entry.isParent = false;
-            entry.size = file.size();
-            entry.mtime = 0;  // SPIFFS doesn't expose mtime
-            fileList.push_back(entry);
-        }
-        file = dir.openNextFile();
-    }
-    dir.close();
-
-    sortFileList();
+    // No filesystem mounted (SPIFFS disabled, SD card not wired)
 }
 
 void FileBrowserApp::sortFileList() {
@@ -187,25 +162,13 @@ bool FileBrowserApp::isLuaFile(const String& name) {
 }
 
 String FileBrowserApp::loadFileContent(const String& path) {
-    String content = "";
-    File f = SPIFFS.open(path, FILE_READ);
-    if (f) {
-        while (f.available()) content += (char)f.read();
-        f.close();
-    }
-    return content;
+    // No filesystem — return empty buffer
+    return "";
 }
 
 bool FileBrowserApp::saveFileContent(const String& path, const String& content) {
-    File f = SPIFFS.open(path, FILE_WRITE);
-    if (!f) {
-        showMessage("Save failed", 2000);
-        return false;
-    }
-    f.print(content);
-    f.close();
-    showMessage("Saved", 2000);
-    return true;
+    showMessage("No filesystem", 2000);
+    return false;
 }
 
 // ==========================================================================
@@ -423,13 +386,12 @@ void FileBrowserApp::renderBrowser() {
 
 void FileBrowserApp::renderHeader() {
     char headerInfo[24];
-    unsigned long freeKB = (SPIFFS.totalBytes() - SPIFFS.usedBytes()) / 1024;
     int fileTotal = (int)fileList.size();
     
     if (fileTotal > 0) {
-        snprintf(headerInfo, sizeof(headerInfo), "%d/%d %luK", selectedIndex + 1, fileTotal, freeKB);
+        snprintf(headerInfo, sizeof(headerInfo), "%d/%d", selectedIndex + 1, fileTotal);
     } else {
-        snprintf(headerInfo, sizeof(headerInfo), "0/0 %luK", freeKB);
+        snprintf(headerInfo, sizeof(headerInfo), "No FS");
     }
     GUI::drawHeader("FILES", headerInfo);
 }

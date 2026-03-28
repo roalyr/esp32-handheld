@@ -7,8 +7,6 @@
 //
 
 #include "hal.h"
-#include <FS.h>
-#include <SPIFFS.h>
 
 // --------------------------------------------------------------------------
 // DISPLAY OBJECTS
@@ -79,15 +77,8 @@ void setupHardware() {
   u8g2.setBitmapMode(1);
   u8g2.enableUTF8Print();
   
-  // Initialize SPIFFS (built-in 4MB flash storage)
-  if (!SPIFFS.begin(true)) {
-    Serial.println("SPIFFS mount failed");
-  } else {
-    Serial.println("SPIFFS mounted successfully");
-  }
-  
-  // SD card — NOT YET WIRED
-  // SD init disabled until hardware is connected
+  // Filesystem: SPIFFS removed — will use SD card when wired
+  Serial.println("No filesystem mounted (SPIFFS disabled)");
 }
 
 // --------------------------------------------------------------------------

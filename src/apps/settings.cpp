@@ -5,7 +5,6 @@
 #include "settings.h"
 #include "../gui.h"
 #include "../config.h"
-#include <SPIFFS.h>
 
 // External sleep control (defined in main.cpp)
 extern bool sleepEnabled;
@@ -178,8 +177,7 @@ void SettingsApp::render() {
         }
         
         char buf[32];
-        unsigned long freeKB = (SPIFFS.totalBytes() - SPIFFS.usedBytes()) / 1024;
-        snprintf(buf, sizeof(buf), "Free: %luKB  v%s", freeKB, FIRMWARE_VERSION);
+        snprintf(buf, sizeof(buf), "No FS  v%s", FIRMWARE_VERSION);
         u8g2.drawStr(2, y, buf);
         
         if (isSelected) u8g2.setDrawColor(1);

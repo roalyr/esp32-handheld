@@ -5,7 +5,6 @@
 #include "hal.h"
 #include "config.h"
 #include "clock.h"
-#include <SPIFFS.h>
 #include <lua.hpp>
 
 namespace LuaVM {
@@ -334,65 +333,29 @@ static void registerSysModule(lua_State* L) {
 // LUA BINDINGS - File System Functions
 // --------------------------------------------------------------------------
 
-// fs.exists(path) - Check if file exists
+// fs.exists(path) - No filesystem mounted, always returns false
 static int lua_fs_exists(lua_State* L) {
-    const char* path = luaL_checkstring(L, 1);
-    lua_pushboolean(L, SPIFFS.exists(path));
+    lua_pushboolean(L, false);
     return 1;
 }
 
-// fs.read(path) - Read entire file as string
+// fs.read(path) - No filesystem mounted
 static int lua_fs_read(lua_State* L) {
-    const char* path = luaL_checkstring(L, 1);
-    File file = SPIFFS.open(path, "r");
-    if (!file) {
-        lua_pushnil(L);
-        lua_pushstring(L, "Could not open file");
-        return 2;
-    }
-    
-    String content = file.readString();
-    file.close();
-    lua_pushstring(L, content.c_str());
-    return 1;
+    lua_pushnil(L);
+    lua_pushstring(L, "No filesystem (SD card not wired)");
+    return 2;
 }
 
-// fs.write(path, content) - Write string to file
+// fs.write(path, content) - No filesystem mounted
 static int lua_fs_write(lua_State* L) {
-    const char* path = luaL_checkstring(L, 1);
-    const char* content = luaL_checkstring(L, 2);
-    
-    File file = SPIFFS.open(path, "w");
-    if (!file) {
-        lua_pushboolean(L, false);
-        lua_pushstring(L, "Could not open file for writing");
-        return 2;
-    }
-    
-    size_t written = file.print(content);
-    file.close();
-    lua_pushboolean(L, written > 0);
-    return 1;
+    lua_pushboolean(L, false);
+    lua_pushstring(L, "No filesystem (SD card not wired)");
+    return 2;
 }
 
-// fs.list(path) - List files in directory
+// fs.list(path) - No filesystem mounted, returns empty table
 static int lua_fs_list(lua_State* L) {
-    const char* path = luaL_optstring(L, 1, "/");
-    
-    File root = SPIFFS.open(path);
-    if (!root || !root.isDirectory()) {
-        lua_newtable(L);
-        return 1;
-    }
-    
     lua_newtable(L);
-    int index = 1;
-    File file = root.openNextFile();
-    while (file) {
-        lua_pushstring(L, file.name());
-        lua_rawseti(L, -2, index++);
-        file = root.openNextFile();
-    }
     return 1;
 }
 
@@ -481,23 +444,8 @@ bool executeFile(const char* path) {
         return false;
     }
     
-    // Ensure path starts with /
-    String fullPath = path;
-    if (!fullPath.startsWith("/")) {
-        fullPath = "/" + fullPath;
-    }
-    
-    File file = SPIFFS.open(fullPath.c_str(), "r");
-    if (!file) {
-        lastError = "Could not open file: ";
-        lastError += path;
-        return false;
-    }
-    
-    String content = file.readString();
-    file.close();
-    
-    return executeString(content.c_str(), path);
+    lastError = "No filesystem (SD card not wired)";
+    return false;
 }
 
 const char* getLastError() {

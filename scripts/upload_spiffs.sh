@@ -1,8 +1,8 @@
 #!/bin/bash
-# Upload SPIFFS filesystem image to ESP32-S2-Mini via DFU
-# Usage: bash scripts/upload_spiffs.sh
-# Requires: dfu-util, esptool v5.x, PlatformIO
-# Procedure: plug board in with BOOT held, then run this script
+# SPIFFS upload is disabled — filesystem removed from firmware.
+# Will be replaced with SD card support when hardware is wired.
+echo "ERROR: SPIFFS is disabled. Filesystem will use SD card (not yet wired)."
+exit 1
 
 set -e
 

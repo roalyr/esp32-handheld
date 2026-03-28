@@ -6,7 +6,6 @@
 #include "../gui.h"
 #include "../lua_vm.h"
 #include "../config.h"
-#include <SPIFFS.h>
 
 extern "C" {
 #include <lua/lua.h>  // For LUA_VERSION_MAJOR/MINOR
@@ -41,36 +40,7 @@ void LuaRunnerApp::update() {
 
 void LuaRunnerApp::scanForLuaFiles() {
     fileCount = 0;
-    
-    File root = SPIFFS.open("/");
-    if (!root || !root.isDirectory()) {
-        return;
-    }
-    
-    File file = root.openNextFile();
-    while (file && fileCount < MAX_FILES) {
-        String name = file.name();
-        // Check for .lua extension
-        if (name.endsWith(".lua")) {
-            // Ensure path starts with /
-            if (!name.startsWith("/")) {
-                name = "/" + name;
-            }
-            files[fileCount++] = name;
-        }
-        file = root.openNextFile();
-    }
-    
-    // Sort files alphabetically (simple bubble sort)
-    for (int i = 0; i < fileCount - 1; i++) {
-        for (int j = 0; j < fileCount - i - 1; j++) {
-            if (files[j] > files[j + 1]) {
-                String temp = files[j];
-                files[j] = files[j + 1];
-                files[j + 1] = temp;
-            }
-        }
-    }
+    // No filesystem mounted (SPIFFS disabled, SD card not wired)
 }
 
 void LuaRunnerApp::drawBrowser() {

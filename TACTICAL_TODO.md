@@ -1,99 +1,208 @@
 # TACTICAL_TODO.md
 <!-- Machine-readable Implementation Contract -->
 
-## CURRENT GOAL: ESP32-S2-Mini Hardware Port — Compile, Flash, Boot
+## CURRENT GOAL: Two-State Architecture — Cooperative Lua Runtime over SPIFFS
 
-- **TARGET_FILE:** `platformio.ini`, `src/config.h`, `src/hal.cpp`, `src/hal.h`
-- **TRUTH_RELIANCE:** `TRUTH_HARDWARE.md` — Sections 0 (Main MCU), 1 (Screen), 2 (Keyboard), 3 (SD — not wired), 4 (Buzzers — not wired), 5 (Free pins)
+- **TARGET_FILES:** `src/main.cpp`, `src/lua_vm.cpp`, `src/lua_vm.h`, `src/hal.cpp`, `src/apps/settings.cpp`, `src/apps/settings.h`, `src/config.h`, `data/luainit.lua`
+- **TRUTH_RELIANCE:** `TRUTH_HARDWARE.md` — Section 0 (4MB Flash / 2MB PSRAM bounds), Section 3 (SD card NOT YET WIRED — SPIFFS only)
 - **TECHNICAL_CONSTRAINTS:**
-  - MCU changed: ESP32-S2-Mini (4MB Flash, 2MB PSRAM) replaces ESP32-S3-N16-R8
-  - Display changed: ST7920 128x64 SPI serial mode replaces ST7565 ERC12864 4-wire HW SPI
-  - ST7920 VCC at 5V (VBUS), GPIO signals at 3.3V from ESP32-S2
-  - ST7920 RST tied to 3V3 (no GPIO reset line) — use `U8X8_PIN_NONE`
-  - ST7920 PSB tied to GND (hardware SPI mode select)
-  - ST7920 contrast controlled by hardware pot on V0 — `u8g2.setContrast()` is a no-op (keep calls to minimize cascading changes)
-  - Use U8g2 SW_SPI for ST7920 (more reliable than HW_SPI for ST7920 protocol)
-  - Native USB CDC for serial monitor and firmware upload (no UART bridge chip)
-  - Fresh PlatformIO on Debian — udev rules required for USB device access
-  - SD card module: NOT YET WIRED — disable SD init in `setupHardware()`
-  - Buzzers: NOT YET WIRED — comment out pin defines, keep as placeholders
-  - Display rotation: default `U8G2_R0`; adjust after first visual test if needed
-  - All prior SESSION_LOG entries reference obsolete S3 hardware — treat as historical only
+  - ESP32-S2-Mini: 4MB flash, 2MB PSRAM. SPIFFS partition uses internal flash (no SD card yet)
+  - **SPIFFS is strictly READ-ONLY at runtime** — it hosts built-in Lua scripts uploaded via `pio run -t uploadfs`. No write/append/remove/rename from Lua or C++. Future SD card will be the writable storage.
+  - `board_build.filesystem = spiffs` is already declared in `platformio.ini`
+  - Lua VM (libLua) is already linked; `LuaVM` namespace exists with gfx/input/sys/fs bindings
+  - Current `fs` Lua module is stubbed ("No filesystem") — must be wired to SPIFFS
+  - Current `executeFile()` is stubbed — must read from SPIFFS
+  - Current architecture: MenuApp → N CPP apps. **New architecture: two C++ states only: MODE_LUA ↔ MODE_SETTINGS**
+  - Lua state must PERSIST across ESC toggles (no init/shutdown on mode switch)
+  - T9 engine (t9_engine.cpp/h) must be exposed to Lua for text input capability
+  - `gui.cpp/h` remains for Settings rendering only — Lua apps use `gfx.*` bindings
+  - `clock.cpp/h` remains as utility (sys.time/sys.timeStr already bound)
+  - Sleep mode logic stays in main.cpp (C++ level, applies to both modes)
+  - Key repeat logic stays in hal.cpp (C++ level, available to both modes)
+  - All removed CPP app source files (`src/apps/menu.*`, `src/apps/file_browser.*`, etc.) stay on disk but are decoupled from build via removed `#include` lines
+  - `data/` folder contents are uploaded to SPIFFS via `pio run -t uploadfs`
+  - luainit.lua fallback chain: try `/sd/luainit.lua` (future SD), else `/luainit.lua` (SPIFFS built-in)
 
 - **ATOMIC_TASKS:**
 
-  - [ ] TASK_1: Install PlatformIO udev rules and verify USB device visibility
-    - Run: `curl -fsSL https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/system/99-platformio-udev.rules | sudo tee /etc/udev/rules.d/99-platformio-udev.rules`
-    - Run: `sudo udevadm control --reload-rules && sudo udevadm trigger`
-    - Verify with: `lsusb | grep -i espressif` (expect VID `303a`)
-    - Verify with: `ls -la /dev/ttyACM*` or `ls -la /dev/ttyUSB*`
-    - If no device visible: user must hold BOOT button, press RESET, release BOOT to enter download mode
-    - Required Result: ESP32-S2-Mini USB device visible to OS
+  - [ ] TASK_1: Re-enable SPIFFS in `src/hal.cpp` + implement real `fs` module in `src/lua_vm.cpp`
+    - In `hal.cpp` `setupHardware()`: add `#include <SPIFFS.h>`, call `SPIFFS.begin(true)` (format on first mount), print mount status to Serial
+    - Add `bool spiffsMounted` global to `hal.cpp`, export via `hal.h`
+    - In `lua_vm.cpp` replace stubbed `registerFsModule` functions with **read-only** SPIFFS implementations:
+      - `fs.exists(path)` → `SPIFFS.exists(path)` → returns bool
+      - `fs.read(path)` → open file `FILE_READ`, read full contents into Lua string, close. Return `(content)` or `(nil, errMsg)`
+      - `fs.list(path)` → iterate SPIFFS directory, return table of `{name=..., size=..., isDir=...}`
+      - `fs.info()` → return table `{total=..., used=..., free=...}` from `SPIFFS.totalBytes()`/`SPIFFS.usedBytes()`
+      - **No write/append/remove/rename** — SPIFFS is read-only at runtime (built-in scripts only)
+    - In `lua_vm.cpp` implement real `executeFile(path)`: open SPIFFS file, read into buffer, call `luaL_loadbuffer` + `lua_pcall`
+    - Required Result: `fs.*` functions operate on real SPIFFS; `LuaVM::executeFile("/luainit.lua")` loads and runs a script from flash
 
-  - [ ] TASK_2: Rewrite `platformio.ini` for ESP32-S2-Mini board target
-    - Required Content:
-      ```ini
-      [env:lolin_s2_mini]
-      platform = espressif32
-      board = lolin_s2_mini
-      framework = arduino
-      monitor_speed = 115200
-      board_build.filesystem = spiffs
-      build_flags =
-          -DBOARD_HAS_PSRAM
-          -DARDUINO_USB_CDC_ON_BOOT=1
-      lib_deps =
-          olikraus/U8g2 @ ^2.35.9
-          chris--a/Keypad @ ^3.1.1
-          https://github.com/DECE2183/libLua.git
+  - [ ] TASK_2: Add cooperative Lua frame-loop API to `src/lua_vm.h` and `src/lua_vm.cpp`
+    - New functions in `LuaVM` namespace:
+      ```cpp
+      bool callGlobalFunction(const char* funcName);
+      // Push global function by name, pcall(0,0), return success.
+      // If function doesn't exist, silently return true (not an error).
+      // On Lua error, set lastError and return false.
+
+      bool callInputHandler(char key);
+      // Push global "_input", push key as single-char string, pcall(1,0).
+      // If "_input" doesn't exist, silently return true.
+      // On Lua error, set lastError and return false.
       ```
-    - Removed: `board_upload.flash_size`, `board_build.arduino.memory_type`, `board_build.partitions` (S2 Mini defaults handle 4MB flash)
-    - Env name changes from `esp32-s3-devkitc-1` → `lolin_s2_mini`
+    - Lua frame contract (documented in luainit.lua header comment):
+      - `_init()` — called once after luainit.lua executes (optional)
+      - `_update()` — called once per frame, for logic/timers (optional)
+      - `_draw()` — called once per frame, for rendering. C++ does NOT call `gfx.clear()`/`gfx.send()` — Lua owns the full draw cycle (optional)
+      - `_input(key)` — called for each just-pressed key as single-char string (optional)
+    - Required signatures in `lua_vm.h`:
+      ```cpp
+      bool callGlobalFunction(const char* funcName);
+      bool callInputHandler(char key);
+      ```
 
-  - [ ] TASK_3: Update `src/config.h` pin definitions per TRUTH_HARDWARE.md
-    - Display pins:
-      - `#define PIN_CS 38` ← LCD pin 4 (RS) — Chip Select
-      - `#define PIN_SPI_SCLK 36` ← LCD pin 6 (E) — Serial Clock
-      - `#define PIN_SPI_SID 35` ← LCD pin 5 (R/W) — Serial Data In (MOSI)
-      - `#define PIN_BACKLIGHT 40` ← LCD pin 19 (BLA) — PWM backlight anode
-      - Remove: `PIN_DC` (ST7920 SPI has no DC line)
-      - Remove: `PIN_RST` (tied to 3V3 in hardware)
-    - Keyboard matrix (TRUTH_HARDWARE Section 2):
-      - Row pins top→bottom: `{3, 5, 7, 9}` (1st=GPIO3, 2nd=GPIO5, 3rd=GPIO7, 4th=GPIO9)
-      - Col pins left→right: `{1, 2, 4, 6, 8}` (5th=GPIO1, 4th=GPIO2, 3rd=GPIO4, 2nd=GPIO6, 1st=GPIO8)
-    - SD card pins: comment out with `// NOT YET WIRED` marker
-    - Buzzer pins: comment out with `// NOT YET WIRED` marker
+  - [ ] TASK_3: Add T9 engine Lua bindings to `src/lua_vm.cpp`
+    - Register new `t9` Lua module in `init()` via `registerT9Module(L)`:
+      ```lua
+      t9.reset()           -- Reset engine state (clear buffer, cursor to 0)
+      t9.input(key)        -- Feed a key char to T9 engine (handles multitap cycling)
+      t9.update()          -- Call per frame (commits pending char on timeout)
+      t9.getText()         -- Return current text buffer as string
+      t9.setText(str)      -- Set text buffer content
+      t9.getCursorByte()   -- Return cursor byte position (int)
+      t9.getCursorChar()   -- Return cursor character position (int, via getUtf8Length of substring)
+      t9.setCursor(pos)    -- Set cursor to character position
+      t9.isPending()       -- Return bool: is there a pending multitap char
+      t9.isShifted()       -- Return bool: shift/caps state
+      t9.commit()          -- Force commit pending character
+      t9.getCharCount()    -- Return total character count (UTF-8 aware)
+      ```
+    - Must `#include "t9_engine.h"` in `lua_vm.cpp`
+    - Use global `engine` instance (already `extern T9Engine engine` in t9_engine.h)
+    - Required Result: Lua scripts can call `t9.input(key)` to build text with T9 multitap
 
-  - [ ] TASK_4: Rewrite `src/hal.cpp` for ST7920 display driver + new pin mapping
-    - Display constructor (SW SPI):
-      `U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R0, PIN_SPI_SCLK, PIN_SPI_SID, PIN_CS);`
-    - Remove: `#define PIN_SPI_SCK 12` and `#define PIN_SPI_MOSI 11` (now in config.h)
-    - Remove: `SPI.begin(...)` call (SW SPI needs no hardware SPI init)
-    - Remove: `#include <SD.h>` and `SD.begin(...)` block (SD not wired)
-    - Remove: `#include <SPI.h>` (not needed for SW SPI)
-    - Update row pins: `byte rowPins[ROWS] = {3, 5, 7, 9};`
-    - Update col pins: `byte colPins[COLS] = {1, 2, 4, 6, 8};`
-    - Keep: `u8g2.setContrast(systemContrast)` — harmless no-op on ST7920
-    - Keep: SPIFFS init (uses internal flash, unaffected by hardware change)
-    - Keep: `systemContrast` and `systemBrightness` globals (avoids cascading changes to settings.cpp)
-    - Backlight PWM: keep `ledcSetup`/`ledcAttachPin` using `PIN_BACKLIGHT` (verify LEDC API compiles)
+  - [ ] TASK_4: Restructure `src/main.cpp` — two-state main loop (MODE_LUA ↔ MODE_SETTINGS)
+    - Remove all CPP app includes except: `apps/settings.h`, `apps/key_tester.h`
+    - Remove all CPP app instances except: `SettingsApp appSettings`, `KeyTesterApp appKeyTester`
+    - Remove: `appMenu`, `appT9Editor`, `appGfxTest`, `appStopwatch`, `appFileBrowser`, `appLuaRunner`, `appClock`
+    - Remove: `#include "app_transfer.h"`, all app transfer logic, T9 exit logic, menu switch logic
+    - Add system mode enum and state:
+      ```cpp
+      enum SystemMode { MODE_LUA, MODE_SETTINGS };
+      static SystemMode currentMode = MODE_LUA;
+      static bool luaError = false;
+      static String luaErrorMsg = "";
+      ```
+    - New `setup()` flow:
+      1. `Serial.begin(115200)` + `setupHardware()` + `showBootSplash()` + `SystemClock::init()`
+      2. `LuaVM::init()` — create Lua state, register all modules
+      3. `LuaVM::executeFile("/luainit.lua")` — run startup script
+      4. If executeFile fails: set `luaError = true`, `luaErrorMsg = LuaVM::getLastError()`
+      5. `LuaVM::callGlobalFunction("_init")` — call optional init hook
+      6. `currentMode = MODE_LUA`
+    - New `loop()` frame logic:
+      ```
+      scanMatrix() → checkSleepMode() → if asleep return
+      
+      ESC handling (just-pressed only, before app/lua input):
+        if MODE_LUA:  currentMode = MODE_SETTINGS; appSettings.start()
+        if MODE_SETTINGS:
+          if appSettings is in submenu (key tester): let it handle ESC
+          else: appSettings.stop(); currentMode = MODE_LUA
+      
+      if MODE_LUA:
+        if luaError: render error screen (show luaErrorMsg, "Press ENTER to retry")
+          ENTER key → re-run luainit.lua, clear error
+        else:
+          for each just-pressed key (except ESC): LuaVM::callInputHandler(key)
+          LuaVM::callGlobalFunction("_update")
+          u8g2.clearBuffer()
+          LuaVM::callGlobalFunction("_draw")
+          u8g2.sendBuffer()
+      
+      if MODE_SETTINGS:
+        route non-ESC input to appSettings.handleInput(key)
+        appSettings.update()
+        u8g2.clearBuffer()
+        appSettings.render()
+        u8g2.sendBuffer()
+      ```
+    - Sleep mode: keep existing `checkSleepMode()` / `enterSleep()` / `wakeUp()` unchanged
+    - Boot splash: keep existing `showBootSplash()` unchanged
+    - Required Result: device boots into Lua frame loop; ESC toggles to Settings and back
 
-  - [ ] TASK_5: Update `src/hal.h` to match new display type declaration
-    - Change: `extern U8G2_ST7565_ERC12864_F_4W_HW_SPI u8g2;` → `extern U8G2_ST7920_128X64_F_SW_SPI u8g2;`
-    - Keep: All other exports unchanged (`systemContrast`, `systemBrightness`, key scan functions)
+  - [ ] TASK_5: Consolidate `src/apps/settings.cpp` and `src/apps/settings.h`
+    - Settings menu items (in order):
+      1. **Brightness** (0–255, displayed as %, editable with LEFT/RIGHT)
+      2. **Sleep** (ON/OFF toggle)
+      3. **Key Tester** (ENTER opens key tester subscreen — reuse existing `KeyTesterApp` logic or inline)
+    - Remove **Contrast** setting (ST7920 has hardware pot, `setContrast()` is no-op — per TRUTH_HARDWARE.md)
+    - Remove **Info** as a menu item — move system info to the header bar instead
+    - Header bar (top line): `"HH:MM  XXk  SPIFFSXXk"` where:
+      - `HH:MM` = system clock from `SystemClock::getTimeString()`
+      - `XXk` = free RAM from `ESP.getFreeHeap() / 1024`
+      - `SPIFFSXXk` = SPIFFS free space `(SPIFFS.totalBytes() - SPIFFS.usedBytes()) / 1024` if mounted, or `"NoFS"` if not
+      - Future: `"BAT XX%"` placeholder when battery monitoring is wired
+    - This keeps clock and system stats visible ONLY in Settings, freeing full 128x64 for Lua VM rendering
+    - Key Tester subscreen:
+      - When user selects "Key Tester" and presses ENTER → enter key tester mode
+      - ESC from key tester → return to settings list (NOT exit settings entirely)
+      - Reuse rendering logic from existing `key_tester.cpp` or inline equivalent
+    - Keep: `systemBrightness` live preview via `ledcWrite(0, value)`
+    - Keep: `sleepEnabled` toggle (extern from main.cpp or add to hal globals)
+    - Required signatures (no change to App interface):
+      ```cpp
+      class SettingsApp : public App {
+        void start() override;
+        void stop() override;
+        void update() override;
+        void render() override;
+        void handleInput(char key) override;
+        bool isInSubmenu();  // Returns true when key tester is active (main.cpp checks for ESC routing)
+      };
+      ```
+
+  - [ ] TASK_6: Create `data/luainit.lua` — built-in Lua startup desktop
+    - This file is uploaded to SPIFFS and runs at boot
+    - Minimal proof-of-concept desktop (full 128x64 available — no system status bar, that lives in Settings):
+      ```lua
+      -- Header: "Lua Desktop" (no clock/RAM — those are in Settings via ESC)
+      -- Body: list of .lua files on SPIFFS (from fs.list)
+      -- Footer: "ESC:Settings  ENTER:Run"
+      -- UP/DOWN: navigate file list
+      -- ENTER: execute selected .lua file (via dofile or loadfile)
+      -- After script finishes: return to desktop
+      ```
+    - Must define `_draw()`, `_update()`, `_input(key)` global callbacks
+    - Must handle errors from child script execution (pcall wrapper)
+    - Keep it simple — this is the fallback desktop, not a full shell
+    - Required Result: on boot, user sees file list and can select+run Lua scripts
+
+  - [ ] TASK_7: Remove dead CPP app code from build
+    - In `src/main.cpp`: remove `#include` lines for: `apps/t9_editor.h`, `apps/gfx_test.h`, `apps/menu.h`, `apps/stopwatch.h`, `apps/file_browser.h`, `apps/yes_no_prompt.h`, `apps/lua_runner.h`, `apps/clock.h`, `app_transfer.h`
+    - Remove corresponding global instances: `appT9Editor`, `appKeyTester` (if inlined into settings), `appGfxTest`, `appMenu`, `appStopwatch`, `appFileBrowser`, `appLuaRunner`, `appClock`
+    - Remove `apps.h` include if no longer referenced
+    - Do NOT delete the source files from `src/apps/` — they serve as reference for future Lua ports
+    - Remove `app_transfer.cpp` and `app_transfer.h` from compilation (or just stop including them — linker will exclude unused objects)
+    - Required Result: `pio run` compiles with only: main.cpp, hal.cpp, config.h, gui.cpp, clock.cpp, lua_vm.cpp, t9_engine.cpp, apps/settings.cpp, apps/key_tester.cpp (if kept separate)
 
   - [ ] VERIFICATION:
-    - Compile: `pio run -e lolin_s2_mini` — zero errors
-    - Flash: `pio run -e lolin_s2_mini -t upload` — upload success
-    - Serial: `pio device monitor` — boot messages visible ("SPIFFS mounted", etc.)
-    - Display: boot splash text visible and readable
-    - Keyboard: Key Tester app responds to all 20 keys with correct labels
-    - If display orientation wrong: note rotation fix (`U8G2_R0` → `U8G2_R2`) for next sprint
-    - If LEDC API compile error: switch to `ledcAttach(PIN_BACKLIGHT, 5000, 8)` (Arduino-ESP32 v3.x API)
+    - Compile: `pio run -e lolin_s2_mini` — zero errors, zero warnings from modified files
+    - Upload SPIFFS: `pio run -t uploadfs` — uploads `data/luainit.lua` + existing .lua scripts to flash
+    - Flash firmware: `bash scripts/flash.sh` — upload success
+    - Serial: `pio device monitor` — see: "SPIFFS mounted", "[LuaVM] Initialized", "Running /luainit.lua"
+    - Display: Lua desktop visible (file list or welcome text)
+    - Input: UP/DOWN navigates, ENTER runs a script, ESC opens Settings
+    - Settings: Brightness slider works, Sleep toggle works, Key Tester subscreen works
+    - Settings header: shows free RAM and "SPIFFS" mount status
+    - ESC from Settings: returns to Lua desktop (state preserved — same scroll position, same screen)
+    - Run a Lua script (e.g., hello.lua): script executes, output visible
+    - After script ends: desktop resumes
+    - Memory: check `ESP.getFreeHeap()` via serial — must be >50KB free after Lua init
 
 ---
 **STATUS:** PENDING
-**PRIORITY:** CRITICAL — No feature work possible until hardware port is verified and board communicates
-**PREVIOUS_HARDWARE:** ESP32-S3-N16-R8 + ST7565 ERC12864
-**NEW_HARDWARE:** ESP32-S2-Mini + ST7920 128x64
-**NOTE:** All SESSION_LOG entries predate this hardware switch and reference obsolete S3 pin assignments
+**PRIORITY:** CRITICAL — This milestone transforms the firmware from a monolithic CPP app into a Lua-first coding environment
+**PREVIOUS_MILESTONE:** Hardware port to ESP32-S2-Mini (COMPLETED — verified compile, flash, boot per SESSION_LOG 2026-03-28)
+**ARCHITECTURE_SHIFT:** Menu + N CPP apps → Two C++ states (MODE_LUA ↔ MODE_SETTINGS) + Lua desktop
+**NOTE:** CPP app source files are preserved in src/apps/ as reference for future Lua reimplementation. T9 engine stays in CPP but is now exposed to Lua via t9.* bindings.

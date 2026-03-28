@@ -77,13 +77,12 @@ void showBootSplash() {
 void enterSleep() {
     isAsleep = true;
     
-    // Turn off display
-    u8g2.clearBuffer();
-    u8g2.sendBuffer();
-    u8g2.setPowerSave(1);  // Display power save mode
+    // Turn off backlight only — do NOT call setPowerSave() on ST7920
+    // as it causes the LCD module to flash/blink erratically
+    ledcWrite(0, 0);  // Backlight off
     
     // Configure wake-up on any GPIO (simplified - wake on any key)
-    // For ESP32-S3, we use light sleep with GPIO wake-up
+    // For ESP32-S2, we use light sleep with GPIO wake-up
     esp_sleep_enable_timer_wakeup(100000);  // Wake every 100ms to check keys
     
     Serial.println("Entering sleep mode...");
@@ -91,8 +90,7 @@ void enterSleep() {
 
 void wakeUp() {
     isAsleep = false;
-    u8g2.setPowerSave(0);  // Restore display
-    u8g2.setContrast(systemContrast);
+    ledcWrite(0, systemBrightness);  // Restore backlight
     lastActivityTime = millis();
     Serial.println("Waking up...");
 }

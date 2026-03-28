@@ -1,29 +1,20 @@
 //
-// PROJECT: ESP32-S3-N16-R8 handheld terminal
+// PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/hal.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TRUTH_GPIO_PINS_ASSIGNEMNT.md Section 2
-// LOG_REF: 2025-12-25
+// TRUTH_LINK: TRUTH_HARDWARE.md Sections 1, 2
+// LOG_REF: 2026-03-28
 //
 
 #include "hal.h"
 #include <FS.h>
 #include <SPIFFS.h>
-#include <SD.h>
-#include <SPI.h>
-
-// --------------------------------------------------------------------------
-// SPI PIN DEFINITIONS (per TRUTH_GPIO_PINS_ASSIGNEMNT.md Section 1)
-// --------------------------------------------------------------------------
-
-#define PIN_SPI_SCK  12
-#define PIN_SPI_MOSI 11
 
 // --------------------------------------------------------------------------
 // DISPLAY OBJECTS
 // --------------------------------------------------------------------------
 
-U8G2_ST7565_ERC12864_F_4W_HW_SPI u8g2(U8G2_R2, PIN_CS, PIN_DC, PIN_RST);
+U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R0, PIN_SPI_SCLK, PIN_SPI_SID, PIN_CS);
 const uint8_t* FONT_SMALL = u8g2_font_5x7_t_cyrillic;
 
 // Global Settings
@@ -34,8 +25,8 @@ int systemBrightness = 255;  // Default full brightness (0-255)
 // INPUT MATRIX CONFIG
 // --------------------------------------------------------------------------
 
-byte rowPins[ROWS] = {42, 41, 40, 39};
-byte colPins[COLS] = {1, 2, 45, 44, 43}; 
+byte rowPins[ROWS] = {3, 7, 5, 9};
+byte colPins[COLS] = {1, 2, 4, 6, 8}; 
 
 char keyMap[ROWS][COLS] = {
   {KEY_ESC,  '1',      '2',      '3',       KEY_BKSP },
@@ -82,29 +73,21 @@ void setupHardware() {
   ledcAttachPin(PIN_BACKLIGHT, 0);
   ledcWrite(0, systemBrightness);
 
-  // Initialize SPI with custom pins (SCK=12, MOSI=11) per TRUTH
-  SPI.begin(PIN_SPI_SCK, -1, PIN_SPI_MOSI, -1);
-
   u8g2.begin();
-  u8g2.setContrast(systemContrast); // Apply global default
+  u8g2.setContrast(systemContrast); // No-op on ST7920 (contrast via hardware pot)
   u8g2.setFontMode(1);
   u8g2.setBitmapMode(1);
   u8g2.enableUTF8Print();
   
-  // Initialize SPIFFS (built-in 16MB flash storage)
+  // Initialize SPIFFS (built-in 4MB flash storage)
   if (!SPIFFS.begin(true)) {
     Serial.println("SPIFFS mount failed");
   } else {
     Serial.println("SPIFFS mounted successfully");
   }
   
-  // Initialize SD card (SPI mode, will be added later)
-  // For now, attempt initialization but don't fail if unavailable
-  if (!SD.begin(-1, SPI, 4000000)) {
-    Serial.println("SD card not available (will be added later)");
-  } else {
-    Serial.println("SD card mounted successfully");
-  }
+  // SD card — NOT YET WIRED
+  // SD init disabled until hardware is connected
 }
 
 // --------------------------------------------------------------------------

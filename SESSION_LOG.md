@@ -13,3 +13,10 @@
 | 2025-12-25 | L2-Gemini | Display Flip + Keys | SUCCESS | Flipped 180° (U8G2_R2), new keyMap with ESC/Tab/Shift/Alt/Arrows. Updated all apps. |
 | 2025-12-25 | L2-Gemini | Key Code Conflict Fix | SUCCESS | Changed KEY_* from letters to ASCII control codes (27,8,9,13,14-19). Fixed main.cpp 'D' check. |
 | 2025-12-25 | L2-Gemini | UI String Updates | SUCCESS | Updated all footer hints to use new key names. Fixed key_tester to show ESC/TAB/etc. Added brightness to settings. |
+| 2026-03-28 | Developer | Implemented TASK_1 (udev rules + USB verify) | SUCCESS | udev rules already installed. ESP32-S2 visible (303a:0002). /dev/ttyACM0 present. User in dialout group. No action needed — prerequisites met. |
+| 2026-03-28 | Developer | Implemented TASK_2 (platformio.ini rewrite) | SUCCESS | Env changed to lolin_s2_mini. Removed S3/N16R8 memory config. Kept lib_deps, added CDC_ON_BOOT flag. |
+| 2026-03-28 | Developer | Implemented TASK_3 (config.h pin update) | SUCCESS | Display: CS=38, SCLK=36, SID=35, BL=40. Removed PIN_DC, PIN_RST. Commented out SD/buzzer pins (NOT YET WIRED). |
+| 2026-03-28 | Developer | Implemented TASK_4 (hal.cpp ST7920 rewrite) | SUCCESS | Constructor: U8G2_ST7920_128X64_F_SW_SPI(R0). Removed SPI.h, SD.h, SPI.begin(), SD.begin(). Rows={3,5,7,9}, Cols={1,2,4,6,8}. Kept LEDC, SPIFFS, setContrast. |
+| 2026-03-28 | Developer | Implemented TASK_5 (hal.h display type) | SUCCESS | Changed extern to U8G2_ST7920_128X64_F_SW_SPI. Updated header to ESP32-S2-Mini. |
+| 2026-03-28 | Developer | VERIFICATION: Compile | SUCCESS | `pio run -e lolin_s2_mini` — zero errors. RAM 10%, Flash 39.2%. |
+| 2026-03-28 | Developer | VERIFICATION: Flash | SUCCESS | Used `esptool --before usb-reset` on /dev/ttyACM3. PIO auto-detect picked wrong port (ACM0=Lenovo modem). Added upload_port/monitor_port=ACM3 and upload_flags for usb-reset to platformio.ini. Board re-enumerated as WEMOS.CC LOLIN-S2-MINI (PID 80c2). Also added udev rule for 303a:0002 MODE=0666 — required for USB reset to work. BOOT button did not work for manual bootloader entry. |

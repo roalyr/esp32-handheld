@@ -1,9 +1,9 @@
 //
-// PROJECT: ESP32-S3-N16-R8 handheld terminal
+// PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/config.h
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TRUTH_GPIO_PINS_ASSIGNEMNT.md Section 1, 3, 4
-// LOG_REF: 2025-12-25
+// TRUTH_LINK: TRUTH_HARDWARE.md Sections 1, 2, 3, 4
+// LOG_REF: 2026-03-28
 //
 
 #ifndef CONFIG_H
@@ -19,20 +19,25 @@
 #define FIRMWARE_NAME "ESP32 Handheld"
 
 // --------------------------------------------------------------------------
-// HARDWARE PINS (ESP32-S3)
+// HARDWARE PINS (ESP32-S2-Mini) — per TRUTH_HARDWARE.md
 // --------------------------------------------------------------------------
 
-#define PIN_CS  10
-#define PIN_DC  13
-#define PIN_RST 14
-#define PIN_BACKLIGHT 9
+// Display (ST7920 128x64, SW SPI)
+#define PIN_CS        38   // LCD pin 4 (RS) — Chip Select
+#define PIN_SPI_SCLK  36   // LCD pin 6 (E)  — Serial Clock
+#define PIN_SPI_SID   35   // LCD pin 5 (R/W) — Serial Data In (MOSI)
+#define PIN_BACKLIGHT 40   // LCD pin 19 (BLA) — PWM backlight anode
+// Note: PIN_DC removed (ST7920 SPI has no DC line)
+// Note: PIN_RST removed (RST tied to 3V3 in hardware)
 
-#define PIN_SD_CS 7
-#define PIN_SD_MISO 8
+// SD card pins — NOT YET WIRED
+// #define PIN_SD_CS   ??
+// #define PIN_SD_MISO ??
 
-#define PIN_BUZZER_1 4
-#define PIN_BUZZER_2 5
-#define PIN_BUZZER_3 6
+// Buzzer pins — NOT YET WIRED
+// #define PIN_BUZZER_1 ??
+// #define PIN_BUZZER_2 ??
+// #define PIN_BUZZER_3 ??
 
 // Key Matrix Dimensions
 const byte ROWS = 4;

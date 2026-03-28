@@ -77,9 +77,20 @@ void showBootSplash() {
 void enterSleep() {
     isAsleep = true;
     
-    // Turn off backlight only — do NOT call setPowerSave() on ST7920
-    // as it causes the LCD module to flash/blink erratically
-    ledcWrite(0, 0);  // Backlight off
+    // Draw screensaver frame (stays visible on LCD with backlight off)
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_5x7_t_cyrillic);
+    const char* line1 = "ESP32 Handheld";
+    const char* line2 = "Press any key";
+    int w1 = u8g2.getStrWidth(line1);
+    int w2 = u8g2.getStrWidth(line2);
+    u8g2.drawStr((128 - w1) / 2, 30, line1);
+    u8g2.drawStr((128 - w2) / 2, 42, line2);
+    u8g2.drawFrame(0, 0, 128, 64);
+    u8g2.sendBuffer();
+    
+    // Turn off backlight — LCD keeps showing screensaver
+    ledcWrite(0, 0);
     
     // Configure wake-up on any GPIO (simplified - wake on any key)
     // For ESP32-S2, we use light sleep with GPIO wake-up
@@ -90,7 +101,7 @@ void enterSleep() {
 
 void wakeUp() {
     isAsleep = false;
-    ledcWrite(0, systemBrightness);  // Restore backlight
+    ledcWrite(0, systemBrightness);  // Restore backlight (app will redraw on next loop)
     lastActivityTime = millis();
     Serial.println("Waking up...");
 }

@@ -5,8 +5,9 @@
 ```
 1. Build:           pio run
 2. Enter DFU mode:  hold BOOT → plug in USB (or hold BOOT → tap RST)
-3. Flash:           bash scripts/flash.sh
-4. Boot:            unplug and re-plug the board (no buttons held)
+3. Flash firmware:  bash scripts/flash.sh
+4. Flash SPIFFS:    bash scripts/upload_spiffs.sh  (also re-flashes firmware)
+5. Boot:            unplug and re-plug the board (no buttons held)
 ```
 
 Or combined: `pio run && bash scripts/flash.sh` (board must already be in DFU mode).
@@ -184,11 +185,29 @@ re-enumerates. DFU is the only method that works reliably because:
 
 ### Flash Memory Layout (ESP32-S2, 4MB)
 
-| Offset | Content |
-|---|---|
-| `0x1000` | Second-stage bootloader |
-| `0x8000` | Partition table |
-| `0x10000` | Application firmware |
+| Offset | Size | Content |
+|---|---|---|
+| `0x1000` | 20KB | Second-stage bootloader |
+| `0x8000` | 8KB | Partition table |
+| `0x10000` | 1280KB | Application firmware (app0) |
+| `0x150000` | 1280KB | OTA slot (app1, unused) |
+| `0x290000` | 1408KB | SPIFFS data partition |
+| `0x3F0000` | 64KB | Core dump |
 
-The `esptool merge-bin` command packs all three into a single binary starting at offset 0,
-with zero-padding between sections. This is what `dfu-util` writes to flash.
+The `esptool merge-bin` command packs binaries into a single image starting at offset 0,
+with **0xFF padding** between sections. This is what `dfu-util` writes to flash.
+
+### SPIFFS Upload
+
+```bash
+bash scripts/upload_spiffs.sh
+```
+
+**CRITICAL:** DFU always writes from flash offset 0x0. If you merge only the SPIFFS
+image at offset `0x290000`, `esptool merge-bin` creates a binary with **zero-padding**
+from 0x0 to 0x28FFFF — this overwrites the bootloader, partition table, and firmware,
+**bricking the device**. The `upload_spiffs.sh` script therefore merges bootloader +
+partitions + firmware + SPIFFS into a single combined image. This means SPIFFS upload
+also re-flashes the firmware (harmless — it's the same binary).
+
+Contents of `data/` are uploaded to the SPIFFS partition via `pio run --target buildfs`.

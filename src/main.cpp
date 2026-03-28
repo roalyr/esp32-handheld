@@ -1,41 +1,34 @@
-// [Revision: v3.4] [Path: src/main.cpp] [Date: 2025-12-11]
-// Description: Main loop with boot splash, sleep mode, settings app, key repeat.
+//
+// PROJECT: ESP32-S2-Mini handheld terminal
+// MODULE: src/main.cpp
+// STATUS: [Level 2 - Implementation]
+// TRUTH_LINK: TACTICAL_TODO TASK_4, TASK_7
+// LOG_REF: 2026-03-28
+//
 
 #include <Arduino.h>
 #include "config.h"
 #include "hal.h"
 #include "clock.h"
 #include "gui.h"
+#include "lua_vm.h"
+#include "lua_scripts.h"
 #include <esp_sleep.h>
 
-// App Modules
-#include "apps/t9_editor.h"
-#include "apps/key_tester.h"
-#include "apps/gfx_test.h"
-#include "apps/menu.h"
-#include "apps/stopwatch.h"
-#include "apps/file_browser.h"
-#include "apps/yes_no_prompt.h"
-#include "apps/lua_runner.h"
-#include "apps/clock.h"
+// App Modules (only Settings remains as CPP app)
 #include "apps/settings.h"
-#include "app_transfer.h"
 
 // --------------------------------------------------------------------------
 // SYSTEM STATE
 // --------------------------------------------------------------------------
 
-T9EditorApp appT9Editor;
-KeyTesterApp appKeyTester;
-GfxTestApp appGfxTest;
-MenuApp appMenu;
-StopwatchApp appStopwatch;
-FileBrowserApp appFileBrowser;
-LuaRunnerApp appLuaRunner;
-ClockApp appClock;
 SettingsApp appSettings;
 
-App* currentApp = nullptr;
+// System mode: two states only
+enum SystemMode { MODE_LUA, MODE_SETTINGS };
+static SystemMode currentMode = MODE_LUA;
+static bool luaError = false;
+static String luaErrorMsg = "";
 
 // Timing Control
 unsigned long lastFrameTime = 0;
@@ -80,12 +73,16 @@ void enterSleep() {
     // Draw screensaver frame (stays visible on LCD with backlight off)
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_5x7_t_cyrillic);
-    const char* line1 = "ESP32 Handheld";
-    const char* line2 = "Press any key";
+    const char* line1 = FIRMWARE_NAME;
+    char line2[32];
+    snprintf(line2, sizeof(line2), "v%s", FIRMWARE_VERSION);
+    const char* line3 = "Press any key";
     int w1 = u8g2.getStrWidth(line1);
     int w2 = u8g2.getStrWidth(line2);
-    u8g2.drawStr((128 - w1) / 2, 30, line1);
-    u8g2.drawStr((128 - w2) / 2, 42, line2);
+    int w3 = u8g2.getStrWidth(line3);
+    u8g2.drawStr((128 - w1) / 2, 24, line1);
+    u8g2.drawStr((128 - w2) / 2, 34, line2);
+    u8g2.drawStr((128 - w3) / 2, 48, line3);
     u8g2.drawFrame(0, 0, 128, 64);
     u8g2.sendBuffer();
     
@@ -125,124 +122,192 @@ void checkSleepMode() {
 }
 
 // --------------------------------------------------------------------------
-// APP MANAGEMENT
+// LUA ERROR SCREEN
 // --------------------------------------------------------------------------
 
-void switchApp(App* newApp) {
-  if (currentApp) currentApp->stop();
-  currentApp = newApp;
-  if (currentApp) currentApp->start();
+void renderLuaError() {
+    u8g2.clearBuffer();
+    
+    // Header
+    GUI::drawHeader("LUA ERROR");
+    
+    // Error message (word-wrapped)
+    u8g2.setFont(u8g2_font_5x7_tf);
+    const char* msg = luaErrorMsg.c_str();
+    int y = GUI::CONTENT_START_Y;
+    int maxWidth = GUI::SCREEN_WIDTH - 4;
+    int lineH = 8;
+    
+    // Simple line-by-line rendering (truncate long lines)
+    int len = strlen(msg);
+    int pos = 0;
+    while (pos < len && y < 54) {
+        // Find how many chars fit on this line
+        char lineBuf[32];
+        int lineLen = 0;
+        while (pos + lineLen < len && lineLen < 31) {
+            if (msg[pos + lineLen] == '\n') { lineLen++; break; }
+            lineLen++;
+        }
+        memcpy(lineBuf, msg + pos, lineLen);
+        lineBuf[lineLen] = '\0';
+        // Strip trailing newline for display
+        if (lineLen > 0 && lineBuf[lineLen - 1] == '\n') lineBuf[lineLen - 1] = '\0';
+        u8g2.drawStr(2, y, lineBuf);
+        pos += lineLen;
+        y += lineH;
+    }
+    
+    // Footer
+    GUI::drawFooterHints("ESC:Settings", "Enter:Retry");
+    
+    u8g2.sendBuffer();
 }
 
+// --------------------------------------------------------------------------
+// SETUP & LOOP
+// --------------------------------------------------------------------------
+
 void setup() {
-  Serial.begin(115200);
-  setupHardware();
-  
-  showBootSplash();
-  
-  SystemClock::init();
-  lastActivityTime = millis();
-  
-  switchApp(&appMenu);
+    Serial.begin(115200);
+    setupHardware();
+    
+    showBootSplash();
+    
+    SystemClock::init();
+    lastActivityTime = millis();
+    
+    // Initialize Lua VM
+    if (!LuaVM::init()) {
+        luaError = true;
+        luaErrorMsg = LuaVM::getLastError();
+        Serial.println("[main] LuaVM init failed");
+    } else {
+        // Run embedded desktop script
+        Serial.println("[main] Running embedded Lua...");
+        if (!LuaVM::executeString(LUA_DESKTOP, "desktop")) {
+            luaError = true;
+            luaErrorMsg = LuaVM::getLastError();
+            Serial.print("[main] Lua failed: ");
+            Serial.println(luaErrorMsg);
+        } else {
+            LuaVM::callGlobalFunction("_init");
+            Serial.println("[main] Embedded Lua loaded OK");
+        }
+    }
+    
+    currentMode = MODE_LUA;
 }
 
 void loop() {
-  unsigned long now = millis();
-  
-  // Check if current app needs high-FPS mode (e.g., GfxTest ghosting mode)
-  bool highFpsMode = (currentApp == &appGfxTest && appGfxTest.needsHighFps());
-  
-  // Use minimal delay for high-FPS mode, normal frame delay otherwise
-  unsigned long frameDelay = highFpsMode ? 1 : FRAME_DELAY_MS;
-  
-  if (now - lastFrameTime >= frameDelay) {
-      lastFrameTime = now;
-
-      // 1. HARDWARE SCAN
-      scanMatrix();
-      
-      // 2. SLEEP MODE CHECK
-      checkSleepMode();
-      if (isAsleep) {
-          esp_light_sleep_start();  // Enter light sleep briefly
-          return;  // Skip rest of loop while asleep
-      }
+    // Always poll keys — catches brief presses even during long frames
+    pollMatrix();
     
-      // 3. EVENT HANDLING
-      for(int i=0; i<activeKeyCount; i++) {
-        char key = activeKeys[i];
+    unsigned long now = millis();
+    
+    if (now - lastFrameTime >= FRAME_DELAY_MS) {
+        lastFrameTime = now;
         
-        // Fire on initial press OR on repeat interval for repeatable keys
-        bool shouldFire = isJustPressed(key) || isRepeating(key);
+        // 1. HARDWARE SCAN (finalizes latched keys for this frame)
+        scanMatrix();
         
-        if (shouldFire) {
-            // Reset activity timer on any input
+        // 2. SLEEP MODE CHECK
+        checkSleepMode();
+        if (isAsleep) {
+            esp_light_sleep_start();
+            return;
+        }
+        
+        // 3. ESC HANDLING (just-pressed only, before app/lua input)
+        if (isJustPressed(KEY_ESC)) {
             lastActivityTime = now;
             
-            // GLOBAL HOME KEY EXCEPTION (ESC key - no repeat for menu navigation)
-            if (key == KEY_ESC && isJustPressed(key)) {
-                 // If we are in T9 Editor, let the app handle it (for popup)
-                 if (currentApp == &appT9Editor) {
-                     currentApp->handleInput(key);
-                     continue;
-                 }
-                 
-                 // If we are in Menu submenu, let the menu handle it (go back)
-                 if (currentApp == &appMenu && appMenu.isInSubmenu()) {
-                     currentApp->handleInput(key);
-                     continue;
-                 }
-                 
-                 // Otherwise, go to Menu
-                 if (currentApp != &appMenu) switchApp(&appMenu);
-                 continue;
+            if (currentMode == MODE_LUA) {
+                currentMode = MODE_SETTINGS;
+                appSettings.start();
+            } else if (currentMode == MODE_SETTINGS) {
+                if (appSettings.isInSubmenu()) {
+                    // Let settings handle ESC internally (e.g. exit key tester)
+                    appSettings.handleInput(KEY_ESC);
+                } else {
+                    appSettings.stop();
+                    currentMode = MODE_LUA;
+                }
             }
-
-            // REGULAR APP INPUT (including repeats)
-            if (currentApp) {
-                currentApp->handleInput(key);
+            // ESC consumed — skip to render
+        } else {
+            // 4. MODE-SPECIFIC INPUT + UPDATE
+            if (currentMode == MODE_LUA) {
+                if (luaError) {
+                    // Check for retry
+                    if (isJustPressed(KEY_ENTER)) {
+                        lastActivityTime = now;
+                        luaError = false;
+                        luaErrorMsg = "";
+                        LuaVM::clearError();
+                        if (!LuaVM::executeString(LUA_DESKTOP, "desktop")) {
+                            luaError = true;
+                            luaErrorMsg = LuaVM::getLastError();
+                        } else {
+                            LuaVM::callGlobalFunction("_init");
+                        }
+                    }
+                } else {
+                    // Forward keys to Lua (just-pressed + repeats for repeatable keys)
+                    for (int i = 0; i < activeKeyCount; i++) {
+                        char key = activeKeys[i];
+                        if (key != KEY_ESC) {
+                            bool shouldFire = isJustPressed(key) || isRepeating(key);
+                            if (shouldFire) {
+                                lastActivityTime = now;
+                                if (!LuaVM::callInputHandler(key)) {
+                                    luaError = true;
+                                    luaErrorMsg = LuaVM::getLastError();
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Frame update
+                    if (!luaError) {
+                        if (!LuaVM::callGlobalFunction("_update")) {
+                            luaError = true;
+                            luaErrorMsg = LuaVM::getLastError();
+                        }
+                    }
+                }
+            } else if (currentMode == MODE_SETTINGS) {
+                // Forward non-ESC input to settings (including repeats)
+                for (int i = 0; i < activeKeyCount; i++) {
+                    char key = activeKeys[i];
+                    if (key != KEY_ESC) {
+                        bool shouldFire = isJustPressed(key) || isRepeating(key);
+                        if (shouldFire) {
+                            lastActivityTime = now;
+                            appSettings.handleInput(key);
+                        }
+                    }
+                }
+                appSettings.update();
             }
         }
-      } 
-    
-      // 3. LOGIC UPDATE
-      if (currentApp) {
-          currentApp->update();
-
-          // Check for T9 Editor Exit Request
-          if (currentApp == &appT9Editor && appT9Editor.exitRequested) {
-              // If a caller requested the editor for a special action, return there
-              if (appTransferCaller != nullptr) {
-                  App* ret = appTransferCaller;
-                  appTransferCaller = nullptr;
-                  appT9Editor.exitRequested = false;
-                  switchApp(ret);
-              } else {
-                  appT9Editor.exitRequested = false;
-                  switchApp(&appMenu);
-              }
-          }
-          
-          // Menu Switching Logic
-          if (currentApp == &appMenu) {
-              int req = appMenu.getPendingSwitch();
-              if (req != -1) {
-                  switch(req) {
-                      case APP_KEY_TESTER:   switchApp(&appKeyTester); break;
-                      case APP_GFX_TEST:     switchApp(&appGfxTest); break;
-                      case APP_STOPWATCH:    switchApp(&appStopwatch); break;
-                      case APP_CLOCK:        switchApp(&appClock); break;
-                      case APP_FILE_BROWSER: switchApp(&appFileBrowser); break;
-                      case APP_LUA_RUNNER:   switchApp(&appLuaRunner); break;
-                      case APP_SETTINGS:     switchApp(&appSettings); break;
-                  }
-              }
-          }
-      }
-    
-      // 4. RENDER
-      u8g2.clearBuffer();
-      if (currentApp) currentApp->render();
-      u8g2.sendBuffer();
-  }
+        
+        // 5. RENDER
+        if (currentMode == MODE_LUA) {
+            if (luaError) {
+                renderLuaError();
+            } else {
+                // Lua _draw() owns gfx.clear()/gfx.send() — no wrapping needed
+                if (!LuaVM::callGlobalFunction("_draw")) {
+                    luaError = true;
+                    luaErrorMsg = LuaVM::getLastError();
+                    renderLuaError();
+                }
+            }
+        } else if (currentMode == MODE_SETTINGS) {
+            u8g2.clearBuffer();
+            appSettings.render();
+            u8g2.sendBuffer();
+        }
+    }
 }

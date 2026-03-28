@@ -1,5 +1,5 @@
-// [Revision: v1.0] [Path: src/apps/settings.h] [Date: 2025-12-11]
-// Description: Settings app for contrast adjustment and system info.
+// [Revision: v2.0] [Path: src/apps/settings.h] [Date: 2026-03-28]
+// Description: Settings app with brightness, sleep, key tester.
 
 #ifndef APP_SETTINGS_H
 #define APP_SETTINGS_H
@@ -9,20 +9,30 @@
 class SettingsApp : public App {
   private:
     enum SettingItem {
-        SETTING_CONTRAST = 0,
-        SETTING_BRIGHTNESS,
+        SETTING_BRIGHTNESS = 0,
         SETTING_SLEEP,
-        SETTING_INFO,
+        SETTING_KEY_TESTER,
         SETTING_COUNT
     };
     
     int selectedIndex;
     bool editMode;
+    bool inKeyTester;
     
     // Editable values
-    int tempContrast;
     int tempBrightness;
     bool tempSleepEnabled;
+
+    // Key tester state
+    char lastPressedKey;
+    static const int HISTORY_SIZE = 14;
+    char keyHistory[HISTORY_SIZE + 1];
+    void addToHistory(char c);
+
+    // Sub-renderers
+    void renderSettingsList();
+    void renderKeyTester();
+    void renderInfoHeader();
 
   public:
     SettingsApp();
@@ -31,6 +41,7 @@ class SettingsApp : public App {
     void update() override;
     void render() override;
     void handleInput(char key) override;
+    bool isInSubmenu();
 };
 
 #endif

@@ -1,5 +1,8 @@
-// [Revision: v1.1] [Path: src/lua_vm.h] [Date: 2025-12-11]
-// Description: Lua VM wrapper for embedded scripting on ESP32 handheld.
+// PROJECT: ESP32-S2-Mini handheld terminal
+// MODULE: src/lua_vm.h
+// STATUS: [Level 2 - Implementation]
+// TRUTH_LINK: TACTICAL_TODO TASK_1/TASK_2/TASK_3
+// LOG_REF: 2026-03-28
 
 #ifndef LUA_VM_H
 #define LUA_VM_H
@@ -44,13 +47,6 @@ bool isReady();
  */
 bool executeString(const char* script, const char* name = "chunk");
 
-/**
- * Execute a Lua script from a file on SPIFFS.
- * @param path Path to the .lua file (e.g., "/scripts/test.lua")
- * @return true if execution was successful
- */
-bool executeFile(const char* path);
-
 // --------------------------------------------------------------------------
 // ERROR HANDLING
 // --------------------------------------------------------------------------
@@ -79,6 +75,29 @@ size_t getMemoryUsage();
  * Run Lua garbage collector.
  */
 void collectGarbage();
+
+// --------------------------------------------------------------------------
+// COOPERATIVE FRAME-LOOP API
+// --------------------------------------------------------------------------
+
+/**
+ * Check if a global Lua function exists.
+ */
+bool hasFunction(const char* funcName);
+
+/**
+ * Call a global Lua function by name with no arguments.
+ * If the function doesn't exist, silently returns true (not an error).
+ * On Lua error, sets lastError and returns false.
+ */
+bool callGlobalFunction(const char* funcName);
+
+/**
+ * Call the global "_input" Lua function with a single key character.
+ * If _input doesn't exist, silently returns true.
+ * On Lua error, sets lastError and returns false.
+ */
+bool callInputHandler(char key);
 
 } // namespace LuaVM
 

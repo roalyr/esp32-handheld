@@ -36,7 +36,8 @@ extern int activeKeyCount;
 // --------------------------------------------------------------------------
 
 void setupHardware();           
-void scanMatrix();              
+void scanMatrix();              // Frame-level: finalize latched keys, update prev state
+void pollMatrix();              // Inter-frame: lightweight scan, latches detected keys
 bool isJustPressed(char key);
 bool isRepeating(char key);     // Returns true on repeat interval for held repeatable keys
 

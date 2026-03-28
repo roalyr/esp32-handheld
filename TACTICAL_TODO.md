@@ -1,7 +1,7 @@
 # TACTICAL_TODO.md
 <!-- Machine-readable Implementation Contract -->
 
-## CURRENT GOAL: Two-State Architecture — Cooperative Lua Runtime over SPIFFS
+## CURRENT GOAL: Two-State Architecture — Cooperative Lua Runtime (Embedded Scripts)
 
 - **TARGET_FILES:** `src/main.cpp`, `src/lua_vm.cpp`, `src/lua_vm.h`, `src/hal.cpp`, `src/apps/settings.cpp`, `src/apps/settings.h`, `src/config.h`, `data/luainit.lua`
 - **TRUTH_RELIANCE:** `TRUTH_HARDWARE.md` — Section 0 (4MB Flash / 2MB PSRAM bounds), Section 3 (SD card NOT YET WIRED — SPIFFS only)
@@ -25,19 +25,10 @@
 
 - **ATOMIC_TASKS:**
 
-  - [ ] TASK_1: Re-enable SPIFFS in `src/hal.cpp` + implement real `fs` module in `src/lua_vm.cpp`
-    - In `hal.cpp` `setupHardware()`: add `#include <SPIFFS.h>`, call `SPIFFS.begin(true)` (format on first mount), print mount status to Serial
-    - Add `bool spiffsMounted` global to `hal.cpp`, export via `hal.h`
-    - In `lua_vm.cpp` replace stubbed `registerFsModule` functions with **read-only** SPIFFS implementations:
-      - `fs.exists(path)` → `SPIFFS.exists(path)` → returns bool
-      - `fs.read(path)` → open file `FILE_READ`, read full contents into Lua string, close. Return `(content)` or `(nil, errMsg)`
-      - `fs.list(path)` → iterate SPIFFS directory, return table of `{name=..., size=..., isDir=...}`
-      - `fs.info()` → return table `{total=..., used=..., free=...}` from `SPIFFS.totalBytes()`/`SPIFFS.usedBytes()`
-      - **No write/append/remove/rename** — SPIFFS is read-only at runtime (built-in scripts only)
-    - In `lua_vm.cpp` implement real `executeFile(path)`: open SPIFFS file, read into buffer, call `luaL_loadbuffer` + `lua_pcall`
-    - Required Result: `fs.*` functions operate on real SPIFFS; `LuaVM::executeFile("/luainit.lua")` loads and runs a script from flash
+  - [x] TASK_1: Re-enable SPIFFS in `src/hal.cpp` + implement real `fs` module in `src/lua_vm.cpp`
+    - **SUPERSEDED**: SPIFFS was implemented, tested on hardware, failed to mount reliably. Replaced by embedded Lua scripts (`lua_scripts.cpp/h`). All SPIFFS code purged. `fs` module and `executeFile()` removed.
 
-  - [ ] TASK_2: Add cooperative Lua frame-loop API to `src/lua_vm.h` and `src/lua_vm.cpp`
+  - [x] TASK_2: Add cooperative Lua frame-loop API to `src/lua_vm.h` and `src/lua_vm.cpp`
     - New functions in `LuaVM` namespace:
       ```cpp
       bool callGlobalFunction(const char* funcName);
@@ -61,7 +52,7 @@
       bool callInputHandler(char key);
       ```
 
-  - [ ] TASK_3: Add T9 engine Lua bindings to `src/lua_vm.cpp`
+  - [x] TASK_3: Add T9 engine Lua bindings to `src/lua_vm.cpp`
     - Register new `t9` Lua module in `init()` via `registerT9Module(L)`:
       ```lua
       t9.reset()           -- Reset engine state (clear buffer, cursor to 0)
@@ -81,7 +72,7 @@
     - Use global `engine` instance (already `extern T9Engine engine` in t9_engine.h)
     - Required Result: Lua scripts can call `t9.input(key)` to build text with T9 multitap
 
-  - [ ] TASK_4: Restructure `src/main.cpp` — two-state main loop (MODE_LUA ↔ MODE_SETTINGS)
+  - [x] TASK_4: Restructure `src/main.cpp` — two-state main loop (MODE_LUA ↔ MODE_SETTINGS)
     - Remove all CPP app includes except: `apps/settings.h`, `apps/key_tester.h`
     - Remove all CPP app instances except: `SettingsApp appSettings`, `KeyTesterApp appKeyTester`
     - Remove: `appMenu`, `appT9Editor`, `appGfxTest`, `appStopwatch`, `appFileBrowser`, `appLuaRunner`, `appClock`
@@ -131,7 +122,7 @@
     - Boot splash: keep existing `showBootSplash()` unchanged
     - Required Result: device boots into Lua frame loop; ESC toggles to Settings and back
 
-  - [ ] TASK_5: Consolidate `src/apps/settings.cpp` and `src/apps/settings.h`
+  - [x] TASK_5: Consolidate `src/apps/settings.cpp` and `src/apps/settings.h`
     - Settings menu items (in order):
       1. **Brightness** (0–255, displayed as %, editable with LEFT/RIGHT)
       2. **Sleep** (ON/OFF toggle)
@@ -162,23 +153,13 @@
       };
       ```
 
-  - [ ] TASK_6: Create `data/luainit.lua` — built-in Lua startup desktop
-    - This file is uploaded to SPIFFS and runs at boot
-    - Minimal proof-of-concept desktop (full 128x64 available — no system status bar, that lives in Settings):
-      ```lua
-      -- Header: "Lua Desktop" (no clock/RAM — those are in Settings via ESC)
-      -- Body: list of .lua files on SPIFFS (from fs.list)
-      -- Footer: "ESC:Settings  ENTER:Run"
-      -- UP/DOWN: navigate file list
-      -- ENTER: execute selected .lua file (via dofile or loadfile)
-      -- After script finishes: return to desktop
-      ```
-    - Must define `_draw()`, `_update()`, `_input(key)` global callbacks
-    - Must handle errors from child script execution (pcall wrapper)
-    - Keep it simple — this is the fallback desktop, not a full shell
-    - Required Result: on boot, user sees file list and can select+run Lua scripts
+  - [x] TASK_6: Create `data/luainit.lua` — built-in Lua startup desktop
+    - **SUPERSEDED**: SPIFFS replaced by embedded scripts. `LUA_DESKTOP` in `src/lua_scripts.cpp` serves as startup desktop.
+    - Defines `_init()`, `_draw()`, `_update()`, `_input(key)` callbacks.
+    - Minimal 4x2 grid desktop with cursor navigation.
+    - Footer: "ESC:Settings"
 
-  - [ ] TASK_7: Remove dead CPP app code from build
+  - [x] TASK_7: Remove dead CPP app code from build
     - In `src/main.cpp`: remove `#include` lines for: `apps/t9_editor.h`, `apps/gfx_test.h`, `apps/menu.h`, `apps/stopwatch.h`, `apps/file_browser.h`, `apps/yes_no_prompt.h`, `apps/lua_runner.h`, `apps/clock.h`, `app_transfer.h`
     - Remove corresponding global instances: `appT9Editor`, `appKeyTester` (if inlined into settings), `appGfxTest`, `appMenu`, `appStopwatch`, `appFileBrowser`, `appLuaRunner`, `appClock`
     - Remove `apps.h` include if no longer referenced
@@ -186,7 +167,7 @@
     - Remove `app_transfer.cpp` and `app_transfer.h` from compilation (or just stop including them — linker will exclude unused objects)
     - Required Result: `pio run` compiles with only: main.cpp, hal.cpp, config.h, gui.cpp, clock.cpp, lua_vm.cpp, t9_engine.cpp, apps/settings.cpp, apps/key_tester.cpp (if kept separate)
 
-  - [ ] VERIFICATION:
+  - [x] VERIFICATION:
     - Compile: `pio run -e lolin_s2_mini` — zero errors, zero warnings from modified files
     - Upload SPIFFS: `pio run -t uploadfs` — uploads `data/luainit.lua` + existing .lua scripts to flash
     - Flash firmware: `bash scripts/flash.sh` — upload success

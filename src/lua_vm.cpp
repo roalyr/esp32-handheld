@@ -1,10 +1,14 @@
-// [Revision: v1.2] [Path: src/lua_vm.cpp] [Date: 2025-12-11]
-// Description: Lua VM implementation with bindings for display, input, filesystem, and system clock.
+// PROJECT: ESP32-S2-Mini handheld terminal
+// MODULE: src/lua_vm.cpp
+// STATUS: [Level 2 - Implementation]
+// TRUTH_LINK: TRUTH_HARDWARE.md Section 0 (4MB Flash), TACTICAL_TODO TASK_1/TASK_2/TASK_3
+// LOG_REF: 2026-03-28
 
 #include "lua_vm.h"
 #include "hal.h"
 #include "config.h"
 #include "clock.h"
+#include "t9_engine.h"
 #include <lua.hpp>
 
 namespace LuaVM {
@@ -15,6 +19,17 @@ namespace LuaVM {
 
 static lua_State* L = nullptr;
 static String lastError = "";
+
+// Lua error handler that appends a stack traceback
+static int luaTraceback(lua_State* L) {
+    const char* msg = lua_tostring(L, 1);
+    if (msg) {
+        luaL_traceback(L, L, msg, 1);
+    } else {
+        lua_pushliteral(L, "(no error message)");
+    }
+    return 1;
+}
 
 // --------------------------------------------------------------------------
 // LUA BINDINGS - Display Functions
@@ -155,12 +170,6 @@ static void registerGfxModule(lua_State* L) {
 // LUA BINDINGS - Input Functions
 // --------------------------------------------------------------------------
 
-// input.scan() - Scan the key matrix (call once per frame)
-static int lua_input_scan(lua_State* L) {
-    scanMatrix();
-    return 0;
-}
-
 // input.pressed(key) - Check if key was just pressed this frame
 static int lua_input_pressed(lua_State* L) {
     const char* keyStr = luaL_checkstring(L, 1);
@@ -215,7 +224,6 @@ static int lua_input_getKeys(lua_State* L) {
 // Register all input functions
 static void registerInputModule(lua_State* L) {
     static const luaL_Reg input_funcs[] = {
-        {"scan", lua_input_scan},
         {"pressed", lua_input_pressed},
         {"held", lua_input_held},
         {"anyPressed", lua_input_anyPressed},
@@ -330,47 +338,129 @@ static void registerSysModule(lua_State* L) {
 }
 
 // --------------------------------------------------------------------------
-// LUA BINDINGS - File System Functions
+// LUA BINDINGS - T9 Engine Functions
 // --------------------------------------------------------------------------
 
-// fs.exists(path) - No filesystem mounted, always returns false
-static int lua_fs_exists(lua_State* L) {
-    lua_pushboolean(L, false);
+// t9.reset() - Reset engine state
+static int lua_t9_reset(lua_State* L) {
+    engine.reset();
+    return 0;
+}
+
+// t9.input(key) - Feed a key char to T9 engine
+static int lua_t9_input(lua_State* L) {
+    const char* keyStr = luaL_checkstring(L, 1);
+    if (strlen(keyStr) > 0) {
+        engine.handleInput(keyStr[0]);
+    }
+    return 0;
+}
+
+// t9.update() - Call per frame (commits pending char on timeout)
+static int lua_t9_update(lua_State* L) {
+    engine.update();
+    return 0;
+}
+
+// t9.getText() - Return current text buffer
+static int lua_t9_getText(lua_State* L) {
+    lua_pushstring(L, engine.textBuffer.c_str());
     return 1;
 }
 
-// fs.read(path) - No filesystem mounted
-static int lua_fs_read(lua_State* L) {
-    lua_pushnil(L);
-    lua_pushstring(L, "No filesystem (SD card not wired)");
-    return 2;
+// t9.setText(str) - Set text buffer content
+static int lua_t9_setText(lua_State* L) {
+    const char* str = luaL_checkstring(L, 1);
+    engine.textBuffer = str;
+    return 0;
 }
 
-// fs.write(path, content) - No filesystem mounted
-static int lua_fs_write(lua_State* L) {
-    lua_pushboolean(L, false);
-    lua_pushstring(L, "No filesystem (SD card not wired)");
-    return 2;
-}
-
-// fs.list(path) - No filesystem mounted, returns empty table
-static int lua_fs_list(lua_State* L) {
-    lua_newtable(L);
+// t9.getCursorByte() - Return cursor byte position
+static int lua_t9_getCursorByte(lua_State* L) {
+    lua_pushinteger(L, engine.cursorPos);
     return 1;
 }
 
-// Register all filesystem functions
-static void registerFsModule(lua_State* L) {
-    static const luaL_Reg fs_funcs[] = {
-        {"exists", lua_fs_exists},
-        {"read", lua_fs_read},
-        {"write", lua_fs_write},
-        {"list", lua_fs_list},
+// t9.getCursorChar() - Return cursor character position (UTF-8 aware)
+static int lua_t9_getCursorChar(lua_State* L) {
+    // Count UTF-8 characters up to cursorPos bytes
+    const char* str = engine.textBuffer.c_str();
+    int charCount = 0;
+    int byteIdx = 0;
+    while (byteIdx < engine.cursorPos && str[byteIdx] != '\0') {
+        uint8_t c = (uint8_t)str[byteIdx];
+        if (c < 0x80) byteIdx += 1;
+        else if ((c & 0xE0) == 0xC0) byteIdx += 2;
+        else if ((c & 0xF0) == 0xE0) byteIdx += 3;
+        else byteIdx += 4;
+        charCount++;
+    }
+    lua_pushinteger(L, charCount);
+    return 1;
+}
+
+// t9.setCursor(pos) - Set cursor to character position
+static int lua_t9_setCursor(lua_State* L) {
+    int pos = luaL_checkinteger(L, 1);
+    engine.setCursor(pos);
+    return 0;
+}
+
+// t9.isPending() - Return bool: is there a pending multitap char
+static int lua_t9_isPending(lua_State* L) {
+    lua_pushboolean(L, engine.pendingCommit);
+    return 1;
+}
+
+// t9.isShifted() - Return bool: shift/caps state
+static int lua_t9_isShifted(lua_State* L) {
+    lua_pushboolean(L, engine.getIsShifted());
+    return 1;
+}
+
+// t9.commit() - Force commit pending character
+static int lua_t9_commit(lua_State* L) {
+    engine.commit();
+    return 0;
+}
+
+// t9.getCharCount() - Return total character count (UTF-8 aware)
+static int lua_t9_getCharCount(lua_State* L) {
+    const char* str = engine.textBuffer.c_str();
+    int charCount = 0;
+    int byteIdx = 0;
+    while (str[byteIdx] != '\0') {
+        uint8_t c = (uint8_t)str[byteIdx];
+        if (c < 0x80) byteIdx += 1;
+        else if ((c & 0xE0) == 0xC0) byteIdx += 2;
+        else if ((c & 0xF0) == 0xE0) byteIdx += 3;
+        else byteIdx += 4;
+        charCount++;
+    }
+    lua_pushinteger(L, charCount);
+    return 1;
+}
+
+// Register all T9 functions
+static void registerT9Module(lua_State* L) {
+    static const luaL_Reg t9_funcs[] = {
+        {"reset", lua_t9_reset},
+        {"input", lua_t9_input},
+        {"update", lua_t9_update},
+        {"getText", lua_t9_getText},
+        {"setText", lua_t9_setText},
+        {"getCursorByte", lua_t9_getCursorByte},
+        {"getCursorChar", lua_t9_getCursorChar},
+        {"setCursor", lua_t9_setCursor},
+        {"isPending", lua_t9_isPending},
+        {"isShifted", lua_t9_isShifted},
+        {"commit", lua_t9_commit},
+        {"getCharCount", lua_t9_getCharCount},
         {NULL, NULL}
     };
     
-    luaL_newlib(L, fs_funcs);
-    lua_setglobal(L, "fs");
+    luaL_newlib(L, t9_funcs);
+    lua_setglobal(L, "t9");
 }
 
 // --------------------------------------------------------------------------
@@ -395,7 +485,7 @@ bool init() {
     registerGfxModule(L);
     registerInputModule(L);
     registerSysModule(L);
-    registerFsModule(L);
+    registerT9Module(L);
     
     lastError = "";
     Serial.println("[LuaVM] Initialized successfully");
@@ -427,25 +517,18 @@ bool executeString(const char* script, const char* name) {
         return false;
     }
     
-    result = lua_pcall(L, 0, LUA_MULTRET, 0);
+    lua_pushcfunction(L, luaTraceback);
+    lua_insert(L, -2);  // put error handler below chunk
+    result = lua_pcall(L, 0, LUA_MULTRET, lua_gettop(L) - 1);
     if (result != LUA_OK) {
         lastError = lua_tostring(L, -1);
-        lua_pop(L, 1);
+        lua_pop(L, 2);  // pop error + error handler
         return false;
     }
+    lua_remove(L, 1);  // remove error handler
     
     lastError = "";
     return true;
-}
-
-bool executeFile(const char* path) {
-    if (L == nullptr) {
-        lastError = "Lua VM not initialized";
-        return false;
-    }
-    
-    lastError = "No filesystem (SD card not wired)";
-    return false;
 }
 
 const char* getLastError() {
@@ -465,6 +548,71 @@ void collectGarbage() {
     if (L != nullptr) {
         lua_gc(L, LUA_GCCOLLECT, 0);
     }
+}
+
+// --------------------------------------------------------------------------
+// COOPERATIVE FRAME-LOOP API
+// --------------------------------------------------------------------------
+
+bool hasFunction(const char* funcName) {
+    if (L == nullptr) return false;
+    lua_getglobal(L, funcName);
+    bool exists = lua_isfunction(L, -1);
+    lua_pop(L, 1);
+    return exists;
+}
+
+bool callGlobalFunction(const char* funcName) {
+    if (L == nullptr) {
+        lastError = "Lua VM not initialized";
+        return false;
+    }
+    
+    lua_pushcfunction(L, luaTraceback);  // push error handler
+    int errIdx = lua_gettop(L);
+    
+    lua_getglobal(L, funcName);
+    if (!lua_isfunction(L, -1)) {
+        lua_pop(L, 2);  // pop non-function + error handler
+        return true;  // Function doesn't exist — not an error
+    }
+    
+    int result = lua_pcall(L, 0, 0, errIdx);
+    if (result != LUA_OK) {
+        lastError = lua_tostring(L, -1);
+        lua_pop(L, 2);  // pop error + error handler
+        return false;
+    }
+    lua_pop(L, 1);  // pop error handler
+    return true;
+}
+
+bool callInputHandler(char key) {
+    if (L == nullptr) {
+        lastError = "Lua VM not initialized";
+        return false;
+    }
+    
+    lua_pushcfunction(L, luaTraceback);  // push error handler
+    int errIdx = lua_gettop(L);
+    
+    lua_getglobal(L, "_input");
+    if (!lua_isfunction(L, -1)) {
+        lua_pop(L, 2);  // pop non-function + error handler
+        return true;  // _input doesn't exist — not an error
+    }
+    
+    char keyStr[2] = {key, '\0'};
+    lua_pushstring(L, keyStr);
+    
+    int result = lua_pcall(L, 1, 0, errIdx);
+    if (result != LUA_OK) {
+        lastError = lua_tostring(L, -1);
+        lua_pop(L, 2);  // pop error + error handler
+        return false;
+    }
+    lua_pop(L, 1);  // pop error handler
+    return true;
 }
 
 } // namespace LuaVM

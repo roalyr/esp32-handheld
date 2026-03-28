@@ -28,6 +28,7 @@ class T9Engine {
     // Getters
     unsigned long getLastPressTime();
     String getCurrentChar(); 
+    bool getIsShifted() const { return isShifted; }
 
     // Core Logic
     void handleInput(char key); 

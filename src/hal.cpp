@@ -2,7 +2,7 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/hal.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TRUTH_HARDWARE.md Sections 1, 2
+// TRUTH_LINK: TRUTH_HARDWARE.md Sections 0, 1, 2
 // LOG_REF: 2026-03-28
 //
 
@@ -47,6 +47,10 @@ int activeKeyCount = 0;
 char prevActiveKeys[MAX_PRESSED_KEYS];
 int prevKeyCount = 0;
 
+// Inter-frame key latching: accumulates presses between frames
+static char latchedKeys[MAX_PRESSED_KEYS];
+static int latchedKeyCount = 0;
+
 // Key repeat state tracking
 struct KeyRepeatState {
     char key;
@@ -76,34 +80,55 @@ void setupHardware() {
   u8g2.setFontMode(1);
   u8g2.setBitmapMode(1);
   u8g2.enableUTF8Print();
-  
-  // Filesystem: SPIFFS removed — will use SD card when wired
-  Serial.println("No filesystem mounted (SPIFFS disabled)");
 }
 
 // --------------------------------------------------------------------------
 // MATRIX SCANNING LOGIC
 // --------------------------------------------------------------------------
 
+// Add a key to the latched set if not already present
+static void latchKey(char key) {
+    for (int i = 0; i < latchedKeyCount; i++) {
+        if (latchedKeys[i] == key) return;
+    }
+    if (latchedKeyCount < MAX_PRESSED_KEYS) {
+        latchedKeys[latchedKeyCount++] = key;
+    }
+}
+
+// Lightweight scan — call between frames to catch brief key presses.
+// Detected keys are OR'd into the latch; they persist until the next
+// frame-level scanMatrix() consumes them.
+void pollMatrix() {
+    for (int c = 0; c < COLS; c++) {
+        pinMode(colPins[c], OUTPUT);
+        digitalWrite(colPins[c], LOW);
+        delayMicroseconds(50);
+
+        for (int r = 0; r < ROWS; r++) {
+            if (digitalRead(rowPins[r]) == LOW) {
+                latchKey(keyMap[r][c]);
+            }
+        }
+        pinMode(colPins[c], INPUT);
+    }
+}
+
+// Frame-level scan — call once per frame. Copies latched keys to activeKeys,
+// updates previous-frame state, then resets the latch.
 void scanMatrix() {
   prevKeyCount = activeKeyCount;
   memcpy(prevActiveKeys, activeKeys, sizeof(activeKeys));
-  activeKeyCount = 0;
 
-  for (int c = 0; c < COLS; c++) {
-    pinMode(colPins[c], OUTPUT);
-    digitalWrite(colPins[c], LOW); 
-    delayMicroseconds(50);
+  // Do one final hardware scan to include keys pressed right now
+  pollMatrix();
 
-    for (int r = 0; r < ROWS; r++) {
-      if (digitalRead(rowPins[r]) == LOW) {
-        if (activeKeyCount < MAX_PRESSED_KEYS) {
-           activeKeys[activeKeyCount++] = keyMap[r][c];
-        }
-      }
-    }
-    pinMode(colPins[c], INPUT);
-  }
+  // Copy latch → activeKeys
+  activeKeyCount = latchedKeyCount;
+  memcpy(activeKeys, latchedKeys, latchedKeyCount);
+
+  // Reset latch for next inter-frame period
+  latchedKeyCount = 0;
 }
 
 bool isJustPressed(char key) {

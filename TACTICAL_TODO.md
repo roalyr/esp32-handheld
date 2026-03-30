@@ -1,189 +1,257 @@
 # TACTICAL_TODO.md
 <!-- Machine-readable Implementation Contract -->
 
-## CURRENT GOAL: Two-State Architecture — Cooperative Lua Runtime (Embedded Scripts)
+## CURRENT GOAL: SD Card Filesystem + Lua File Manager + Hot-Plug Safety
 
-- **TARGET_FILES:** `src/main.cpp`, `src/lua_vm.cpp`, `src/lua_vm.h`, `src/hal.cpp`, `src/apps/settings.cpp`, `src/apps/settings.h`, `src/config.h`, `data/luainit.lua`
-- **TRUTH_RELIANCE:** `TRUTH_HARDWARE.md` — Section 0 (4MB Flash / 2MB PSRAM bounds), Section 3 (SD card NOT YET WIRED — SPIFFS only)
+- **TARGET_FILES:** `src/config.h`, `src/hal.cpp`, `src/hal.h`, `src/lua_vm.cpp`, `src/lua_scripts.cpp`, `src/lua_scripts.h`, `src/apps/settings.cpp`, `src/apps/settings.h`, `src/main.cpp`
+- **TRUTH_RELIANCE:**
+  - `TRUTH_HARDWARE.md` Section 0 — ESP32-S2-Mini, 4MB Flash, 2MB PSRAM
+  - `TRUTH_HARDWARE.md` Section 0.1 — SPI bus: MOSI=GPIO 35, MISO=GPIO 37, SCK=GPIO 36
+  - `TRUTH_HARDWARE.md` Section 1 — LCD ST7920: CS=GPIO 38, shares MOSI+SCK on SPI bus
+  - `TRUTH_HARDWARE.md` Section 3 — SD card module: CS=GPIO 39, shares SPI bus
 - **TECHNICAL_CONSTRAINTS:**
-  - ESP32-S2-Mini: 4MB flash, 2MB PSRAM. SPIFFS partition uses internal flash (no SD card yet)
-  - **SPIFFS is strictly READ-ONLY at runtime** — it hosts built-in Lua scripts uploaded via `pio run -t uploadfs`. No write/append/remove/rename from Lua or C++. Future SD card will be the writable storage.
-  - `board_build.filesystem = spiffs` is already declared in `platformio.ini`
-  - Lua VM (libLua) is already linked; `LuaVM` namespace exists with gfx/input/sys/fs bindings
-  - Current `fs` Lua module is stubbed ("No filesystem") — must be wired to SPIFFS
-  - Current `executeFile()` is stubbed — must read from SPIFFS
-  - Current architecture: MenuApp → N CPP apps. **New architecture: two C++ states only: MODE_LUA ↔ MODE_SETTINGS**
-  - Lua state must PERSIST across ESC toggles (no init/shutdown on mode switch)
-  - T9 engine (t9_engine.cpp/h) must be exposed to Lua for text input capability
-  - `gui.cpp/h` remains for Settings rendering only — Lua apps use `gfx.*` bindings
-  - `clock.cpp/h` remains as utility (sys.time/sys.timeStr already bound)
-  - Sleep mode logic stays in main.cpp (C++ level, applies to both modes)
-  - Key repeat logic stays in hal.cpp (C++ level, available to both modes)
-  - All removed CPP app source files (`src/apps/menu.*`, `src/apps/file_browser.*`, etc.) stay on disk but are decoupled from build via removed `#include` lines
-  - `data/` folder contents are uploaded to SPIFFS via `pio run -t uploadfs`
-  - luainit.lua fallback chain: try `/sd/luainit.lua` (future SD), else `/luainit.lua` (SPIFFS built-in)
+  - ESP32-S2-Mini: 4MB flash, 2MB PSRAM
+  - **Shared SPI bus** — LCD and SD card share MOSI (GPIO 35) and SCK (GPIO 36). SD card adds MISO (GPIO 37). Each device has its own CS (LCD=38, SD=39).
+  - **LCD must switch from SW_SPI to HW_SPI** — Currently `U8G2_ST7920_128X64_F_SW_SPI` bit-bangs GPIO pins. Once `SPI.begin()` claims pins for the hardware SPI peripheral, `digitalWrite()` no longer controls pin output. Both devices must use the hardware SPI peripheral with CS-based multiplexing. Constructor changes to `U8G2_ST7920_128X64_F_HW_SPI(U8G2_R0, PIN_CS)`.
+  - **SPI init order:** `SPI.begin(SCK, MISO, MOSI)` → `u8g2.begin()` → `SD.begin(SD_CS)`. U8G2 HW_SPI uses the already-configured Arduino SPI instance. Single-threaded loop — no SPI bus contention.
+  - **SD card partition: FAT32** — Most common SD card format. Arduino `SD.h` library (built-in to ESP32 Arduino framework, wraps `ff` FAT filesystem). No additional lib_deps needed.
+  - **Hot-plug safe:** SD card may be removed/inserted at any time. All SD operations must check mount status first, handle failures gracefully (return error, never crash), and allow re-mount.
+  - Lua VM (libLua) is already linked; `LuaVM` namespace has gfx/input/sys/t9 bindings
+  - Embedded Lua scripts are in `lua_scripts.cpp` — no SPIFFS (purged in previous milestone)
+  - Architecture: two C++ states (MODE_LUA ↔ MODE_SETTINGS) + Lua desktop (unchanged)
+  - Lua desktop currently shows a 4×2 empty grid — must be upgraded to show detected apps
+  - **Desktop app detection:** Each embedded Lua script that should appear on the desktop must have `--@DESKTOP:AppName` as its first line. C++ scans for this prefix and builds a registry. The desktop queries this registry to populate its grid.
 
 - **ATOMIC_TASKS:**
 
-  - [x] TASK_1: Re-enable SPIFFS in `src/hal.cpp` + implement real `fs` module in `src/lua_vm.cpp`
-    - **SUPERSEDED**: SPIFFS was implemented, tested on hardware, failed to mount reliably. Replaced by embedded Lua scripts (`lua_scripts.cpp/h`). All SPIFFS code purged. `fs` module and `executeFile()` removed.
+  - [ ] TASK_1: Update `src/config.h` — add SD card CS pin and SPI bus pin constants
+    - Add `#define PIN_SD_CS 39` — SD card chip select (TRUTH_HARDWARE Section 3)
+    - Add `#define PIN_SPI_MISO 37` — MISO line for SD card (TRUTH_HARDWARE Section 0.1)
+    - Rename `PIN_SPI_SID` to `PIN_SPI_MOSI` for clarity (value stays 35)
+    - Keep `PIN_SPI_SCLK` = 36 (already defined)
+    - Keep `PIN_CS` = 38 (LCD chip select, already defined)
+    - Remove the "SD card pins — NOT YET WIRED" comment block
+    - Required Result: All SPI bus and SD card pins have named constants
 
-  - [x] TASK_2: Add cooperative Lua frame-loop API to `src/lua_vm.h` and `src/lua_vm.cpp`
-    - New functions in `LuaVM` namespace:
-      ```cpp
-      bool callGlobalFunction(const char* funcName);
-      // Push global function by name, pcall(0,0), return success.
-      // If function doesn't exist, silently return true (not an error).
-      // On Lua error, set lastError and return false.
+  - [ ] TASK_2: Update `src/hal.cpp` and `src/hal.h` — switch LCD to HW_SPI, init shared SPI bus, add SD card mount/unmount
+    - **hal.h changes:**
+      - Add `#include <SPI.h>` (needed for HW_SPI display type)
+      - Change display extern from `U8G2_ST7920_128X64_F_SW_SPI` to `U8G2_ST7920_128X64_F_HW_SPI`
+      - Add SD state exports:
+        ```cpp
+        bool mountSD();       // Attempt to (re)mount SD card, return success
+        void unmountSD();     // Safely unmount SD card
+        bool isSDMounted();   // Check current mount status
+        uint64_t sdTotalBytes();  // Total SD card space (0 if not mounted)
+        uint64_t sdUsedBytes();   // Used SD card space (0 if not mounted)
+        ```
+    - **hal.cpp changes:**
+      - Add `#include <SPI.h>` and `#include <SD.h>`
+      - Change display constructor:
+        ```cpp
+        U8G2_ST7920_128X64_F_HW_SPI u8g2(U8G2_R0, PIN_CS);
+        ```
+      - Add SD state:
+        ```cpp
+        static bool sdMounted = false;
+        ```
+      - In `setupHardware()`, BEFORE `u8g2.begin()`:
+        ```cpp
+        SPI.begin(PIN_SPI_SCLK, PIN_SPI_MISO, PIN_SPI_MOSI);
+        ```
+      - In `setupHardware()`, AFTER `u8g2.begin()`:
+        ```cpp
+        sdMounted = SD.begin(PIN_SD_CS);
+        if (sdMounted) Serial.println("[HAL] SD card mounted");
+        else Serial.println("[HAL] SD card not found");
+        ```
+      - Implement `mountSD()`:
+        ```cpp
+        bool mountSD() {
+            if (sdMounted) { SD.end(); sdMounted = false; }
+            sdMounted = SD.begin(PIN_SD_CS);
+            return sdMounted;
+        }
+        ```
+      - Implement `unmountSD()`:
+        ```cpp
+        void unmountSD() {
+            if (sdMounted) { SD.end(); sdMounted = false; }
+        }
+        ```
+      - Implement `isSDMounted()`: return `sdMounted`
+      - Implement `sdTotalBytes()`: return `sdMounted ? SD.totalBytes() : 0`
+      - Implement `sdUsedBytes()`: return `sdMounted ? SD.usedBytes() : 0`
+    - **CRITICAL:** This changes LCD communication from software bit-bang to hardware SPI. Must verify display still works after this change before proceeding to further tasks. If HW_SPI fails, fallback: manage SPI dynamically (`SPI.begin()`/`SPI.end()` around SD operations, keep SW_SPI for LCD).
 
-      bool callInputHandler(char key);
-      // Push global "_input", push key as single-char string, pcall(1,0).
-      // If "_input" doesn't exist, silently return true.
-      // On Lua error, set lastError and return false.
-      ```
-    - Lua frame contract (documented in luainit.lua header comment):
-      - `_init()` — called once after luainit.lua executes (optional)
-      - `_update()` — called once per frame, for logic/timers (optional)
-      - `_draw()` — called once per frame, for rendering. C++ does NOT call `gfx.clear()`/`gfx.send()` — Lua owns the full draw cycle (optional)
-      - `_input(key)` — called for each just-pressed key as single-char string (optional)
-    - Required signatures in `lua_vm.h`:
-      ```cpp
-      bool callGlobalFunction(const char* funcName);
-      bool callInputHandler(char key);
-      ```
-
-  - [x] TASK_3: Add T9 engine Lua bindings to `src/lua_vm.cpp`
-    - Register new `t9` Lua module in `init()` via `registerT9Module(L)`:
+  - [ ] TASK_3: Add `sd` Lua module to `src/lua_vm.cpp`
+    - Add `#include <SD.h>` at top (for `File` type access)
+    - Register new `sd` Lua module in `init()` via `registerSDModule(L)`:
       ```lua
-      t9.reset()           -- Reset engine state (clear buffer, cursor to 0)
-      t9.input(key)        -- Feed a key char to T9 engine (handles multitap cycling)
-      t9.update()          -- Call per frame (commits pending char on timeout)
-      t9.getText()         -- Return current text buffer as string
-      t9.setText(str)      -- Set text buffer content
-      t9.getCursorByte()   -- Return cursor byte position (int)
-      t9.getCursorChar()   -- Return cursor character position (int, via getUtf8Length of substring)
-      t9.setCursor(pos)    -- Set cursor to character position
-      t9.isPending()       -- Return bool: is there a pending multitap char
-      t9.isShifted()       -- Return bool: shift/caps state
-      t9.commit()          -- Force commit pending character
-      t9.getCharCount()    -- Return total character count (UTF-8 aware)
+      sd.mount()           -- Attempt to mount SD card, return bool success
+      sd.unmount()         -- Safely unmount SD card
+      sd.isMounted()       -- Return bool: is SD card currently mounted
+      sd.list(path)        -- Return table: {{name="file.txt", isDir=false, size=1234}, ...}
+                           -- Returns nil, "SD not mounted" on failure
+      sd.exists(path)      -- Return bool: does file/dir exist on SD
+      sd.read(path)        -- Read entire file as string (max 32KB guard to prevent OOM)
+                           -- Returns nil, "error message" on failure
+      sd.info()            -- Return table: {total=bytes, used=bytes, free=bytes}
+                           -- Returns nil, "SD not mounted" if not mounted
+      sd.mkdir(path)       -- Create directory, return bool success
       ```
-    - Must `#include "t9_engine.h"` in `lua_vm.cpp`
-    - Use global `engine` instance (already `extern T9Engine engine` in t9_engine.h)
-    - Required Result: Lua scripts can call `t9.input(key)` to build text with T9 multitap
-
-  - [x] TASK_4: Restructure `src/main.cpp` — two-state main loop (MODE_LUA ↔ MODE_SETTINGS)
-    - Remove all CPP app includes except: `apps/settings.h`, `apps/key_tester.h`
-    - Remove all CPP app instances except: `SettingsApp appSettings`, `KeyTesterApp appKeyTester`
-    - Remove: `appMenu`, `appT9Editor`, `appGfxTest`, `appStopwatch`, `appFileBrowser`, `appLuaRunner`, `appClock`
-    - Remove: `#include "app_transfer.h"`, all app transfer logic, T9 exit logic, menu switch logic
-    - Add system mode enum and state:
+    - **Hot-plug safety:** Every sd.* function that accesses the card must:
+      1. Check `isSDMounted()` first — return nil + "SD not mounted" if false
+      2. If any SD.* call fails unexpectedly, call `unmountSD()` to mark as disconnected
+      3. Close all File handles before returning (even on error paths)
+      4. Return nil + error string on failure (never throw, never crash)
+    - `sd.list(path)` implementation:
       ```cpp
-      enum SystemMode { MODE_LUA, MODE_SETTINGS };
-      static SystemMode currentMode = MODE_LUA;
-      static bool luaError = false;
-      static String luaErrorMsg = "";
+      if (!isSDMounted()) { lua_pushnil(L); lua_pushstring(L, "SD not mounted"); return 2; }
+      File dir = SD.open(path);
+      if (!dir || !dir.isDirectory()) {
+          if (dir) dir.close();
+          lua_pushnil(L); lua_pushstring(L, "not a directory"); return 2;
+      }
+      lua_newtable(L);
+      int idx = 1;
+      File entry = dir.openNextFile();
+      while (entry) {
+          lua_newtable(L);
+          lua_pushstring(L, entry.name()); lua_setfield(L, -2, "name");
+          lua_pushboolean(L, entry.isDirectory()); lua_setfield(L, -2, "isDir");
+          lua_pushinteger(L, entry.size()); lua_setfield(L, -2, "size");
+          lua_rawseti(L, -2, idx++);
+          entry.close();
+          entry = dir.openNextFile();
+      }
+      dir.close();
+      return 1;
       ```
-    - New `setup()` flow:
-      1. `Serial.begin(115200)` + `setupHardware()` + `showBootSplash()` + `SystemClock::init()`
-      2. `LuaVM::init()` — create Lua state, register all modules
-      3. `LuaVM::executeFile("/luainit.lua")` — run startup script
-      4. If executeFile fails: set `luaError = true`, `luaErrorMsg = LuaVM::getLastError()`
-      5. `LuaVM::callGlobalFunction("_init")` — call optional init hook
-      6. `currentMode = MODE_LUA`
-    - New `loop()` frame logic:
-      ```
-      scanMatrix() → checkSleepMode() → if asleep return
-      
-      ESC handling (just-pressed only, before app/lua input):
-        if MODE_LUA:  currentMode = MODE_SETTINGS; appSettings.start()
-        if MODE_SETTINGS:
-          if appSettings is in submenu (key tester): let it handle ESC
-          else: appSettings.stop(); currentMode = MODE_LUA
-      
-      if MODE_LUA:
-        if luaError: render error screen (show luaErrorMsg, "Press ENTER to retry")
-          ENTER key → re-run luainit.lua, clear error
-        else:
-          for each just-pressed key (except ESC): LuaVM::callInputHandler(key)
-          LuaVM::callGlobalFunction("_update")
-          u8g2.clearBuffer()
-          LuaVM::callGlobalFunction("_draw")
-          u8g2.sendBuffer()
-      
-      if MODE_SETTINGS:
-        route non-ESC input to appSettings.handleInput(key)
-        appSettings.update()
-        u8g2.clearBuffer()
-        appSettings.render()
-        u8g2.sendBuffer()
-      ```
-    - Sleep mode: keep existing `checkSleepMode()` / `enterSleep()` / `wakeUp()` unchanged
-    - Boot splash: keep existing `showBootSplash()` unchanged
-    - Required Result: device boots into Lua frame loop; ESC toggles to Settings and back
+    - `sd.read(path)` — Open file, check size ≤ 32768, read into buffer, push as Lua string, close. Return nil + error if file too large or open fails.
+    - Required Result: Lua scripts can safely browse and read SD card contents
 
-  - [x] TASK_5: Consolidate `src/apps/settings.cpp` and `src/apps/settings.h`
-    - Settings menu items (in order):
-      1. **Brightness** (0–255, displayed as %, editable with LEFT/RIGHT)
-      2. **Sleep** (ON/OFF toggle)
-      3. **Key Tester** (ENTER opens key tester subscreen — reuse existing `KeyTesterApp` logic or inline)
-    - Remove **Contrast** setting (ST7920 has hardware pot, `setContrast()` is no-op — per TRUTH_HARDWARE.md)
-    - Remove **Info** as a menu item — move system info to the header bar instead
-    - Header bar (top line): `"HH:MM  XXk  SPIFFSXXk"` where:
-      - `HH:MM` = system clock from `SystemClock::getTimeString()`
-      - `XXk` = free RAM from `ESP.getFreeHeap() / 1024`
-      - `SPIFFSXXk` = SPIFFS free space `(SPIFFS.totalBytes() - SPIFFS.usedBytes()) / 1024` if mounted, or `"NoFS"` if not
-      - Future: `"BAT XX%"` placeholder when battery monitoring is wired
-    - This keeps clock and system stats visible ONLY in Settings, freeing full 128x64 for Lua VM rendering
-    - Key Tester subscreen:
-      - When user selects "Key Tester" and presses ENTER → enter key tester mode
-      - ESC from key tester → return to settings list (NOT exit settings entirely)
-      - Reuse rendering logic from existing `key_tester.cpp` or inline equivalent
-    - Keep: `systemBrightness` live preview via `ledcWrite(0, value)`
-    - Keep: `sleepEnabled` toggle (extern from main.cpp or add to hal globals)
-    - Required signatures (no change to App interface):
+  - [ ] TASK_4: Add embedded Lua file manager script to `src/lua_scripts.cpp` and `src/lua_scripts.h`
+    - **lua_scripts.h:** Add `extern const char LUA_FILE_MANAGER[];`
+    - **lua_scripts.cpp:** Add `const char LUA_FILE_MANAGER[] = R"LUA(...)LUA";`
+    - **First line of LUA_FILE_MANAGER source must be:** `--@DESKTOP:Files`
+      This is the flag the desktop uses to detect it as a desktop app (see TASK_5).
+    - Script functionality:
+      - State: `currentPath` (starts at "/"), `entries` table, `selectedIndex`, `scrollOffset`
+      - `_init()`: check `sd.isMounted()`, if mounted call `refreshList()`
+      - `refreshList()`: call `sd.list(currentPath)`, sort dirs first then files, populate entries
+      - `_draw()`:
+        - Header bar (inverted): current path (truncated from left if too long)
+        - If SD not mounted: centered message "No SD card" + "TAB:Retry"
+        - If mounted: scrollable file list with ">" prefix for dirs, file size for files
+        - Scrollbar if entries exceed visible area (~4 lines)
+        - Footer: "ESC:Back BKSP:Up ENTER:Open"
+      - `_input(key)`:
+        - UP/DOWN: move selection, adjust scroll offset if needed
+        - ENTER on directory: append name + "/" to currentPath, refreshList()
+        - ENTER on file: (no action for now — future: view/run)
+        - BKSP: go up one directory level (strip last path component), refreshList()
+        - TAB: attempt `sd.mount()` + refreshList() (manual retry for hot-plug)
+        - ESC: set `_APP_EXIT = true` to signal return to desktop
+      - Error handling: wrap all sd.* calls, display error messages inline, never crash
+    - Required Result: A working read-only file browser for SD card contents
+
+  - [ ] TASK_5: Add app registry system + update desktop to detect and launch apps
+    - **lua_scripts.cpp:** Add app registry infrastructure:
       ```cpp
-      class SettingsApp : public App {
-        void start() override;
-        void stop() override;
-        void update() override;
-        void render() override;
-        void handleInput(char key) override;
-        bool isInSubmenu();  // Returns true when key tester is active (main.cpp checks for ESC routing)
+      struct EmbeddedApp {
+          const char* name;     // Display name (extracted from --@DESKTOP:Name)
+          const char* source;   // Full Lua source code
       };
+      
+      // All embedded scripts that could be apps:
+      static const char* ALL_SCRIPTS[] = { LUA_FILE_MANAGER /*, future scripts */ };
+      static const int ALL_SCRIPTS_COUNT = sizeof(ALL_SCRIPTS) / sizeof(ALL_SCRIPTS[0]);
+      
+      // Parsed at startup — only scripts with --@DESKTOP: prefix
+      static EmbeddedApp desktopApps[16];
+      static int desktopAppCount = 0;
+      
+      void initAppRegistry(); // Scan ALL_SCRIPTS for --@DESKTOP: prefix, populate desktopApps
+      int getDesktopAppCount();
+      const EmbeddedApp* getDesktopApp(int index);
       ```
+      - `initAppRegistry()` iterates ALL_SCRIPTS, checks if first line starts with `--@DESKTOP:`, extracts name after colon (trimmed), adds to desktopApps array.
+    - **lua_scripts.h:** Add struct definition, `initAppRegistry()`, `getDesktopAppCount()`, `getDesktopApp()` declarations
+    - **lua_vm.cpp:** Add `scripts` Lua module registered in `init()`:
+      ```lua
+      scripts.count()         -- Return number of desktop apps (int)
+      scripts.getName(index)  -- Return name of app at 1-based index (string)
+      scripts.load(index)     -- Execute app source code in current Lua state, return bool success
+      ```
+      - `scripts.load(index)` calls `LuaVM::executeString(app->source, app->name)` internally
+    - **main.cpp:** Call `initAppRegistry()` in `setup()` after serial init (before LuaVM::init is fine)
+    - **lua_scripts.cpp:** Rewrite `LUA_DESKTOP` to use the app registry:
+      - `_init()`: query `scripts.count()` and build list of app names
+      - List-based layout (not grid) — show app names in a scrollable vertical list
+      - If no apps: show "No apps found"
+      - ENTER on selected app:
+        1. Save desktop callbacks: `desktop_draw = _draw; desktop_update = _update; desktop_input = _input`
+        2. Call `scripts.load(selectedIndex)` — which redefines _draw/_update/_input globals
+        3. If load fails: restore desktop callbacks, show error
+      - `_update()`: check `_APP_EXIT` flag — if true, restore desktop callbacks and clear flag
+      - Footer: "ESC:Settings ENTER:Open"
+      - UP/DOWN: navigate app list
+    - Required Result: Desktop shows "Files" app, ENTER launches it, ESC from app returns to desktop
 
-  - [x] TASK_6: Create `data/luainit.lua` — built-in Lua startup desktop
-    - **SUPERSEDED**: SPIFFS replaced by embedded scripts. `LUA_DESKTOP` in `src/lua_scripts.cpp` serves as startup desktop.
-    - Defines `_init()`, `_draw()`, `_update()`, `_input(key)` callbacks.
-    - Minimal 4x2 grid desktop with cursor navigation.
-    - Footer: "ESC:Settings"
+  - [ ] TASK_6: Update `src/apps/settings.cpp` — show SD card mount status and space info
+    - In `renderSettingsList()`, modify the system info line (currently "RAM XXk") to include SD status:
+      ```cpp
+      int freeRamK = ESP.getFreeHeap() / 1024;
+      char buf[40];
+      if (isSDMounted()) {
+          uint64_t totalMB = sdTotalBytes() / (1024*1024);
+          uint64_t usedMB = sdUsedBytes() / (1024*1024);
+          snprintf(buf, sizeof(buf), "RAM %dk SD %llu/%lluM", freeRamK, (unsigned long long)usedMB, (unsigned long long)totalMB);
+      } else {
+          snprintf(buf, sizeof(buf), "RAM %dk SD:none", freeRamK);
+      }
+      u8g2.drawStr(2, y, buf);
+      ```
+    - `hal.h` already included via `app_interface.h` — `isSDMounted()`, `sdTotalBytes()`, `sdUsedBytes()` accessible
+    - Required Result: Settings screen shows SD card status and capacity alongside RAM info
 
-  - [x] TASK_7: Remove dead CPP app code from build
-    - In `src/main.cpp`: remove `#include` lines for: `apps/t9_editor.h`, `apps/gfx_test.h`, `apps/menu.h`, `apps/stopwatch.h`, `apps/file_browser.h`, `apps/yes_no_prompt.h`, `apps/lua_runner.h`, `apps/clock.h`, `app_transfer.h`
-    - Remove corresponding global instances: `appT9Editor`, `appKeyTester` (if inlined into settings), `appGfxTest`, `appMenu`, `appStopwatch`, `appFileBrowser`, `appLuaRunner`, `appClock`
-    - Remove `apps.h` include if no longer referenced
-    - Do NOT delete the source files from `src/apps/` — they serve as reference for future Lua ports
-    - Remove `app_transfer.cpp` and `app_transfer.h` from compilation (or just stop including them — linker will exclude unused objects)
-    - Required Result: `pio run` compiles with only: main.cpp, hal.cpp, config.h, gui.cpp, clock.cpp, lua_vm.cpp, t9_engine.cpp, apps/settings.cpp, apps/key_tester.cpp (if kept separate)
+  - [ ] TASK_7: Hot-plug safety verification pass
+    - **hal.cpp `mountSD()`:** Always call `SD.end()` before re-trying `SD.begin()` to clean up stale state (already specified in TASK_2)
+    - **lua_vm.cpp `sd.*` functions:** Verify every function:
+      - Returns nil + error string if `!isSDMounted()` (except `sd.mount()` and `sd.isMounted()`)
+      - Wraps SD file operations in null checks (File object validity)
+      - Closes all File handles before returning (even on error paths)
+      - If an SD operation fails unexpectedly on a "mounted" card, calls `unmountSD()` to flag card as removed
+    - **lua_scripts.cpp `LUA_FILE_MANAGER`:** Verify:
+      - All `sd.*` return values checked for nil
+      - Shows user-friendly error messages on failure
+      - TAB key triggers `sd.mount()` + `refreshList()` for manual recovery
+      - Never crashes on nil/empty results from SD operations
+    - **main.cpp:** No periodic SD polling needed (saves CPU). Mount check is on-demand:
+      - Settings: `isSDMounted()` checked each render (lightweight bool read via `sdTotalBytes()`/`sdUsedBytes()`)
+      - File manager: checks on init and on explicit TAB retry
+      - Apps degrade gracefully to "SD not found" state without crashes
+    - Required Result: SD card can be safely removed and re-inserted at any time without crashes or hangs
 
-  - [x] VERIFICATION:
-    - Compile: `pio run -e lolin_s2_mini` — zero errors, zero warnings from modified files
-    - Upload SPIFFS: `pio run -t uploadfs` — uploads `data/luainit.lua` + existing .lua scripts to flash
-    - Flash firmware: `bash scripts/flash.sh` — upload success
-    - Serial: `pio device monitor` — see: "SPIFFS mounted", "[LuaVM] Initialized", "Running /luainit.lua"
-    - Display: Lua desktop visible (file list or welcome text)
-    - Input: UP/DOWN navigates, ENTER runs a script, ESC opens Settings
-    - Settings: Brightness slider works, Sleep toggle works, Key Tester subscreen works
-    - Settings header: shows free RAM and "SPIFFS" mount status
-    - ESC from Settings: returns to Lua desktop (state preserved — same scroll position, same screen)
-    - Run a Lua script (e.g., hello.lua): script executes, output visible
-    - After script ends: desktop resumes
-    - Memory: check `ESP.getFreeHeap()` via serial — must be >50KB free after Lua init
+  - [ ] VERIFICATION:
+    - **Compile:** `pio run -e lolin_s2_mini` — zero errors, zero warnings from modified files
+    - **Flash:** `bash scripts/flash.sh` — upload success
+    - **CRITICAL — LCD test:** Display must still work after SW_SPI → HW_SPI switch. If display is blank or garbled: check `SPI.begin()` is called BEFORE `u8g2.begin()`, check ST7920 serial clock speed (U8G2 default should be ≤1MHz). If unfixable, fall back to SPI.begin/end management with SW_SPI.
+    - **SD mount:** Insert FAT32-formatted SD card → serial shows "[HAL] SD card mounted"
+    - **SD not present:** Boot without SD card → serial shows "[HAL] SD card not found", device functions normally
+    - **Settings:** ESC → Settings shows "RAM XXk SD XX/XXM" (with card) or "RAM XXk SD:none" (without)
+    - **Desktop:** Shows "Files" app in list (detected via `--@DESKTOP:Files` flag)
+    - **Launch app:** Select "Files" + ENTER → file manager loads, shows SD card root listing
+    - **File browser:** UP/DOWN scrolls, ENTER opens folders, BKSP goes up, path shown at top
+    - **Hot-plug remove:** Remove SD card while file manager is open → next sd.list() returns nil → shows "No SD card" message
+    - **Hot-plug insert:** Press TAB → `sd.mount()` succeeds → file list refreshes
+    - **ESC from app:** ESC in file manager → `_APP_EXIT = true` → desktop restores, grid visible
+    - **Memory:** `ESP.getFreeHeap()` via serial — must be >40KB free after Lua init + SD mount
 
 ---
 **STATUS:** PENDING
-**PRIORITY:** CRITICAL — This milestone transforms the firmware from a monolithic CPP app into a Lua-first coding environment
-**PREVIOUS_MILESTONE:** Hardware port to ESP32-S2-Mini (COMPLETED — verified compile, flash, boot per SESSION_LOG 2026-03-28)
-**ARCHITECTURE_SHIFT:** Menu + N CPP apps → Two C++ states (MODE_LUA ↔ MODE_SETTINGS) + Lua desktop
-**NOTE:** CPP app source files are preserved in src/apps/ as reference for future Lua reimplementation. T9 engine stays in CPP but is now exposed to Lua via t9.* bindings.
+**PRIORITY:** CRITICAL — Adds external storage and first user-launchable Lua app via desktop registry
+**PREVIOUS_MILESTONE:** Two-State Architecture — Cooperative Lua Runtime (COMPLETED — all 7 tasks verified per SESSION_LOG 2026-03-28)
+**KEY_RISK:** HW_SPI switch for ST7920 LCD — display may require tuning (SPI clock speed, mode). If HW_SPI fails on hardware, fallback: manage SPI peripheral dynamically (`SPI.begin()`/`SPI.end()` around SD operations, keep SW_SPI for LCD between SD accesses).
+**NOTE:** No `lib_deps` additions needed — `SD.h`, `SPI.h`, `FS.h` are built into ESP32 Arduino framework. CPP app source files remain in src/apps/ for reference.

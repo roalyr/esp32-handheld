@@ -1,5 +1,12 @@
 0. Main: ESP32-S2-mini (2MB PSRAM, 4MB FLASH).
 
+0.1. SPI bus.
+| Function    | GPIO |
+| ----------- | ---- |
+| MOSI        | 35   |
+| MISO        | 37   |
+| SCK         | 36   |
+
 1. Screen: LCD 12864-20M 128X64 ST7920.
 | **ESP32-S2 Mini Pin** | **LCD Module Pin** | **Function**     | **Connection Note**               |
 | --------------------- | ------------------ | ---------------- | --------------------------------- |
@@ -30,7 +37,10 @@
 | 4th         | 2    |
 | 5th (left)  | 1    |
 
-3. SDcard module (Not yet wired).
+3. SDcard module (SPI bus)
+| Columns     | GPIO |
+| ----------- | ---- |
+| CS          | 39   |
 
 4. Buzzers (Not yet wired).
 

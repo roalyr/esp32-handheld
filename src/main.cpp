@@ -170,6 +170,8 @@ void renderLuaError() {
 
 void setup() {
     Serial.begin(115200);
+    delay(2000);
+
     setupHardware();
     
     showBootSplash();
@@ -196,6 +198,16 @@ void setup() {
         }
     }
     
+    // SD probe here (after Lua init) so serial output is reliably visible
+    Serial.println("[main] Probing SD card...");
+    if (mountSD()) {
+        Serial.printf("[main] SD card: detected (%llu/%llu bytes used)\n",
+                      (unsigned long long)sdUsedBytes(),
+                      (unsigned long long)sdTotalBytes());
+    } else {
+        Serial.println("[main] SD card: not found");
+    }
+    
     currentMode = MODE_LUA;
 }
 
@@ -214,7 +226,7 @@ void loop() {
         // 2. SLEEP MODE CHECK
         checkSleepMode();
         if (isAsleep) {
-            esp_light_sleep_start();
+            delay(100);  // Idle poll — avoid esp_light_sleep which glitches HW SPI
             return;
         }
         

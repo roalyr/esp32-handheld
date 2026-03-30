@@ -1,10 +1,15 @@
-// [Revision: v2.0] [Path: src/apps/settings.cpp] [Date: 2026-03-28]
-// Description: Settings app — brightness, sleep toggle, key tester.
+// PROJECT: ESP32-S2-Mini handheld terminal
+// MODULE: src/apps/settings.cpp
+// STATUS: [Level 2 - Implementation]
+// TRUTH_LINK: TRUTH_HARDWARE.md Sections 0, 3
+// LOG_REF: 2026-03-30
+// Description: Settings app — brightness, sleep toggle, key tester, SD card info.
 
 #include "settings.h"
 #include "../gui.h"
 #include "../config.h"
 #include "../clock.h"
+#include "../hal.h"
 
 // External sleep control (defined in main.cpp)
 extern bool sleepEnabled;
@@ -194,7 +199,13 @@ void SettingsApp::renderSettingsList() {
     {
         int freeRamK = ESP.getFreeHeap() / 1024;
         char buf[40];
-        snprintf(buf, sizeof(buf), "RAM %dk", freeRamK);
+        if (isSDMounted()) {
+            uint64_t totalMB = sdTotalBytes() / (1024*1024);
+            uint64_t usedMB = sdUsedBytes() / (1024*1024);
+            snprintf(buf, sizeof(buf), "RAM %dk SD %llu/%lluM", freeRamK, (unsigned long long)usedMB, (unsigned long long)totalMB);
+        } else {
+            snprintf(buf, sizeof(buf), "RAM %dk SD:none", freeRamK);
+        }
         u8g2.drawStr(2, y, buf);
     }
 }

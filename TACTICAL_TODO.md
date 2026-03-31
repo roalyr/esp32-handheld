@@ -24,7 +24,7 @@
 
 - **ATOMIC_TASKS:**
 
-  - [ ] TASK_1: Update `src/config.h` — add SD card CS pin and SPI bus pin constants
+  - [x] TASK_1: Update `src/config.h` — add SD card CS pin and SPI bus pin constants
     - Add `#define PIN_SD_CS 39` — SD card chip select (TRUTH_HARDWARE Section 3)
     - Add `#define PIN_SPI_MISO 37` — MISO line for SD card (TRUTH_HARDWARE Section 0.1)
     - Rename `PIN_SPI_SID` to `PIN_SPI_MOSI` for clarity (value stays 35)
@@ -33,7 +33,7 @@
     - Remove the "SD card pins — NOT YET WIRED" comment block
     - Required Result: All SPI bus and SD card pins have named constants
 
-  - [ ] TASK_2: Update `src/hal.cpp` and `src/hal.h` — switch LCD to HW_SPI, init shared SPI bus, add SD card mount/unmount
+  - [x] TASK_2: Update `src/hal.cpp` and `src/hal.h` — switch LCD to HW_SPI, init shared SPI bus, add SD card mount/unmount
     - **hal.h changes:**
       - Add `#include <SPI.h>` (needed for HW_SPI display type)
       - Change display extern from `U8G2_ST7920_128X64_F_SW_SPI` to `U8G2_ST7920_128X64_F_HW_SPI`

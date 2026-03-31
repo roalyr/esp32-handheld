@@ -27,7 +27,7 @@
 #define PIN_SPI_MISO  37   // GPIO 37 — MISO (SD card only, LCD doesn't use)
 #define PIN_SPI_SCLK  36   // GPIO 36 — SCK  (LCD E + SD SCK)
 
-// Display (ST7920 128x64, HW SPI) — per TRUTH_HARDWARE.md Section 1
+// Display (ST7920 128x64, SW SPI) — per TRUTH_HARDWARE.md Section 1
 #define PIN_CS        38   // LCD pin 4 (RS) — Chip Select
 #define PIN_BACKLIGHT 40   // LCD pin 19 (BLA) — PWM backlight anode
 // Note: PIN_DC removed (ST7920 SPI has no DC line)

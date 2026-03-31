@@ -128,6 +128,9 @@ bool sdBeginSession() {
     Serial.println("[HAL] SdFat.begin() failed");
     // Mount failed — clean up
     sdSpi.end();
+    // Restore MOSI/SCK to GPIO output mode for LCD bit-bang
+    pinMode(PIN_SPI_SCLK, OUTPUT);
+    pinMode(PIN_SPI_MOSI, OUTPUT);
     sdCardDetected = false;
     sdCachedTotal = 0;
     sdCachedUsed = 0;

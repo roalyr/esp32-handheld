@@ -173,15 +173,32 @@ void T9Predict::prevPrefixCandidate() {
 
 // --- Private helpers ---
 
-uint32_t T9Predict::digitsToKey() const {
-    uint32_t key = 0;
+// All keys are left-aligned to 15 decimal digits.
+// e.g. digits "7663" -> 766300000000000ULL.
+// This guarantees that prefix ordering is preserved in integer sort:
+// all entries whose digit string starts with "7663" form a
+// contiguous range [766300000000000, 766400000000000).
+
+static const int KEY_WIDTH = 15;
+
+// Pre-computed powers of 10
+static uint64_t pow10(int n) {
+    uint64_t r = 1;
+    for (int i = 0; i < n; i++) r *= 10;
+    return r;
+}
+
+uint64_t T9Predict::digitsToKey() const {
+    uint64_t key = 0;
     for (int i = 0; i < digitCount; i++) {
         key = key * 10 + (digits[i] - '0');
     }
+    // Left-align to KEY_WIDTH digits
+    key *= pow10(KEY_WIDTH - digitCount);
     return key;
 }
 
-int T9Predict::binarySearch(uint32_t key) const {
+int T9Predict::binarySearch(uint64_t key) const {
     int lo = 0;
     int hi = T9_INDEX_COUNT - 1;
     while (lo <= hi) {
@@ -204,7 +221,7 @@ void T9Predict::updateCandidates() {
         return;
     }
 
-    uint32_t key = digitsToKey();
+    uint64_t key = digitsToKey();
     indexPos = binarySearch(key);
 
     if (indexPos >= 0) {
@@ -222,22 +239,20 @@ void T9Predict::updateCandidates() {
     updatePrefixCandidates();
 }
 
-// Count decimal digits in a key value
-int T9Predict::keyDigitCount(uint32_t key) {
+// With left-aligned keys, prefix matching is a simple range check.
+// All keys sharing the same N-digit prefix fall in a contiguous range.
+// Not used with left-aligned keys, but kept for API compatibility.
+int T9Predict::keyDigitCount(uint64_t key) {
     if (key == 0) return 1;
     int count = 0;
     while (key > 0) { count++; key /= 10; }
     return count;
 }
 
-// Check if key starts with the given prefix (prefix has prefixLen digits)
-bool T9Predict::keyStartsWith(uint32_t key, uint32_t prefix, int prefixLen) {
-    int kLen = keyDigitCount(key);
-    if (kLen < prefixLen) return false;
-    // Divide key by 10^(kLen - prefixLen) to get leading digits
-    uint32_t divisor = 1;
-    for (int i = 0; i < kLen - prefixLen; i++) divisor *= 10;
-    return (key / divisor) == prefix;
+bool T9Predict::keyStartsWith(uint64_t key, uint64_t prefix, int prefixLen) {
+    (void)prefixLen; // unused with left-aligned keys
+    // Not used in the new prefix scan; kept for compatibility
+    return key >= prefix && key < prefix + pow10(KEY_WIDTH - prefixLen);
 }
 
 void T9Predict::updatePrefixCandidates() {
@@ -246,37 +261,31 @@ void T9Predict::updatePrefixCandidates() {
 
     if (digitCount == 0) return;
 
-    uint32_t prefix = digitsToKey();
+    uint64_t prefixKey = digitsToKey();  // already left-aligned
+    // All matching keys are in [prefixKey, prefixKey + span)
+    uint64_t span = pow10(KEY_WIDTH - digitCount);
+    uint64_t rangeEnd = prefixKey + span;
 
-    // Pass 1: exact match — reuse binary search result
-    if (indexPos >= 0) {
-        prefixMatches[prefixCandidateCount].indexPos = indexPos;
-        prefixMatches[prefixCandidateCount].wordIdx = 0;
-        prefixCandidateCount++;
-    }
-
-    // Pass 2: longer keys that start with our prefix.
-    // The index is sorted by key value. Keys starting with our prefix
-    // form a contiguous range: [prefix * 10 .. prefix * 10 + 7] for +1 digit,
-    // [prefix * 100 .. prefix * 100 + 77] for +2, etc.
-    // Use binary search to find lower bound of prefix*10, then scan forward.
-    uint32_t rangeStart = prefix * 10;  // Shortest longer key starting with prefix
-    // Find first index entry >= rangeStart via binary search
+    // Binary search for the first index entry >= prefixKey
     int lo = 0, hi = (int)T9_INDEX_COUNT - 1, firstIdx = (int)T9_INDEX_COUNT;
     while (lo <= hi) {
         int mid = (lo + hi) / 2;
         T9IndexEntry entry;
         memcpy_P(&entry, &t9_index[mid], sizeof(T9IndexEntry));
-        if (entry.key >= rangeStart) { firstIdx = mid; hi = mid - 1; }
+        if (entry.key >= prefixKey) { firstIdx = mid; hi = mid - 1; }
         else lo = mid + 1;
     }
-    // Scan forward from firstIdx while keys still start with prefix
+
+    // Scan forward while keys are within range
     for (int i = firstIdx; i < (int)T9_INDEX_COUNT && prefixCandidateCount < MAX_PREFIX_MATCHES; i++) {
         T9IndexEntry entry;
         memcpy_P(&entry, &t9_index[i], sizeof(T9IndexEntry));
-        if (!keyStartsWith(entry.key, prefix, digitCount)) break;
+        if (entry.key >= rangeEnd) break;
         prefixMatches[prefixCandidateCount].indexPos = i;
         prefixMatches[prefixCandidateCount].wordIdx = 0;
         prefixCandidateCount++;
     }
+
+    // The exact match (indexPos) is already included since it falls in range.
+    // No separate Pass 1 needed.
 }

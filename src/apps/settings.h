@@ -49,6 +49,11 @@ class SettingsApp : public App {
     int t9ScrollOffset;        // Vertical scroll offset for text area
     unsigned long t9CursorMoveTime; // Last cursor move timestamp (suppresses blink)
 
+    // T9 fallback-ABC mode: when prediction fails mid-word,
+    // commit the known part and continue in ABC for the rest.
+    bool t9Fallback;           // true = in fallback-ABC mode
+    int t9FallbackStart;       // cursor pos where fallback region begins (for inverse render)
+
     void t9EditorReset();
     void t9HandleInput(char key);
     void t9CommitPrediction();  // Confirm predicted word into text

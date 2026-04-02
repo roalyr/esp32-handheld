@@ -64,10 +64,10 @@ private:
 
     void updateCandidates();
     void updatePrefixCandidates();
-    int binarySearch(uint32_t key) const;
-    uint32_t digitsToKey() const;
-    static int keyDigitCount(uint32_t key);
-    static bool keyStartsWith(uint32_t key, uint32_t prefix, int prefixLen);
+    int binarySearch(uint64_t key) const;
+    uint64_t digitsToKey() const;
+    static int keyDigitCount(uint64_t key);
+    static bool keyStartsWith(uint64_t key, uint64_t prefix, int prefixLen);
 };
 
 #endif

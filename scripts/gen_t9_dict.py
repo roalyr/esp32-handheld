@@ -179,19 +179,17 @@ def word_to_digits(word):
 
 
 def digits_to_key(digits):
-    """Convert digit string to uint32 sort key.
+    """Convert digit string to uint64 sort key.
     
-    Each digit (2-9) is mapped: '2'=2, '3'=3, etc.
-    Left-aligned in a 32-bit integer for natural sort order.
-    Max 8 digits supported.
+    Left-aligned in a 15-digit field so that prefix ordering is
+    preserved in integer sort.  e.g. "7663" -> 766300000000000.
+    Max 15 digits supported.
     """
     key = 0
-    for i, d in enumerate(digits[:8]):
+    for i, d in enumerate(digits[:15]):
         key = key * 10 + int(d)
-    # Pad with zeros to 8 digits for consistent comparison
-    # Actually, we DON'T pad — just use the natural decimal value.
-    # "46" = 46, "466" = 466, "4663" = 4663 — all unique since
-    # T9 only uses digits 2-9 (no 0/1), so no ambiguity.
+    # Left-align: pad to 15 digits
+    key *= 10 ** (15 - len(digits[:15]))
     return key
 
 
@@ -211,7 +209,7 @@ def generate_dict(words, max_candidates_per_seq=8, max_word_len=15):
     groups = defaultdict(list)
     for word in unique_words:
         digits = word_to_digits(word)
-        if digits and len(digits) <= 8:
+        if digits and len(digits) <= 15:
             if len(groups[digits]) < max_candidates_per_seq:
                 groups[digits].append(word)
     
@@ -247,7 +245,7 @@ def emit_header(sorted_groups, out=sys.stdout):
     
     # Index entry struct
     out.write('struct T9IndexEntry {\n')
-    out.write('    uint32_t key;      // Digit sequence as decimal (e.g., "4663" = 4663)\n')
+    out.write('    uint64_t key;      // Digit sequence as decimal (e.g., "4663" = 4663)\n')
     out.write('    uint32_t offset;   // Byte offset into t9_word_pool\n')
     out.write('    uint8_t  count;    // Number of words for this sequence\n')
     out.write('    uint8_t  _pad[3];\n')
@@ -274,7 +272,8 @@ def emit_header(sorted_groups, out=sys.stdout):
             if b == 0:
                 break
             first_word += chr(b)
-        out.write(f'    {{{key}, {offset}, {count}, 0}},  // "{digit_str}" -> "{first_word}"...\n')
+        out.write(f'    {{{key}ULL, {offset}, {count}, {{0}}}},')
+        out.write(f'  // "{digit_str}" -> "{first_word}"...\n')
     out.write('};\n\n')
     
     out.write(f'const uint32_t T9_INDEX_COUNT = {len(index_entries)};\n')
@@ -306,22 +305,13 @@ def main():
         # Read external word list (one word per line, frequency sorted)
         with open(sys.argv[1]) as f:
             words = [line.strip().lower() for line in f if line.strip()]
-        print(f'// Source: {sys.argv[1]} ({len(words)} input words)', file=sys.stderr)
+        words.extend(LUA_WORDS)  # Always include Lua keywords
+        print(f'// Source: {sys.argv[1]} + lua ({len(words)} input words)', file=sys.stderr)
     else:
-        # Use built-in frequency list + system dictionary + Lua keywords
-        words = list(BUILTIN_WORDS)  # Priority: built-in common words first
-        words.extend(LUA_WORDS)      # Then Lua keywords
-        # Append system dictionary if available
-        sys_dict = '/usr/share/dict/words'
-        if os.path.isfile(sys_dict):
-            with open(sys_dict) as f:
-                for line in f:
-                    w = line.strip().lower()
-                    if w.isalpha() and 2 <= len(w) <= 15:
-                        words.append(w)
-            print(f'// Source: built-in + lua + {sys_dict}', file=sys.stderr)
-        else:
-            print(f'// Source: built-in + lua (no system dict found)', file=sys.stderr)
+        # Use built-in frequency list + Lua keywords
+        words = list(BUILTIN_WORDS)
+        words.extend(LUA_WORDS)
+        print(f'// Source: built-in + lua ({len(words)} input words)', file=sys.stderr)
     
     sorted_groups = generate_dict(words)
     emit_header(sorted_groups)

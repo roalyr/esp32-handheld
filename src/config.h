@@ -3,7 +3,7 @@
 // MODULE: src/config.h
 // STATUS: [Level 2 - Implementation]
 // TRUTH_LINK: TRUTH_HARDWARE.md Sections 0.1, 1, 2, 3, 4
-// LOG_REF: 2026-03-30
+// LOG_REF: 2026-04-01
 //
 
 #ifndef CONFIG_H
@@ -15,7 +15,7 @@
 // VERSION INFO
 // --------------------------------------------------------------------------
 
-#define FIRMWARE_VERSION "1.1.0"
+#define FIRMWARE_VERSION "1.1.1"
 #define FIRMWARE_NAME "ESP32 Handheld"
 
 // --------------------------------------------------------------------------
@@ -96,8 +96,8 @@ enum AppId {
 #define DEFAULT_CONTRAST 0     // Global default contrast (0-255)
 
 // Key repeat settings (for non-T9 keys like arrows/nav)
-#define KEY_REPEAT_DELAY_MS  400   // Initial delay before repeat starts
-#define KEY_REPEAT_RATE_MS   100   // Interval between repeats
+#define KEY_REPEAT_DELAY_MS  200   // Initial delay before repeat starts
+#define KEY_REPEAT_RATE_MS   80    // Interval between repeats
 
 // Sleep/power settings
 #define SLEEP_TIMEOUT_MS     60000  // 60 seconds of inactivity before sleep

@@ -269,7 +269,7 @@ void loop() {
                     for (int i = 0; i < activeKeyCount; i++) {
                         char key = activeKeys[i];
                         if (key != KEY_ESC) {
-                            bool shouldFire = isJustPressed(key) || isRepeating(key);
+                            bool shouldFire = isJustPressed(key) || isRepeating(key) || isLongPressed(key);
                             if (shouldFire) {
                                 lastActivityTime = now;
                                 if (!LuaVM::callInputHandler(key)) {
@@ -293,7 +293,7 @@ void loop() {
                 for (int i = 0; i < activeKeyCount; i++) {
                     char key = activeKeys[i];
                     if (key != KEY_ESC) {
-                        bool shouldFire = isJustPressed(key) || isRepeating(key);
+                        bool shouldFire = isJustPressed(key) || isRepeating(key) || isLongPressed(key);
                         if (shouldFire) {
                             lastActivityTime = now;
                             appSettings.handleInput(key);

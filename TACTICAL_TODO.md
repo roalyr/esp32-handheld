@@ -1,203 +1,175 @@
 # TACTICAL_TODO.md
 <!-- Machine-readable Implementation Contract -->
 
-## CURRENT GOAL: SD Card Filesystem + Lua File Manager + Hot-Plug Safety
+## CURRENT GOAL: T9 Editor Overhaul + UX Polish v1.1.1
 
-- **TARGET_FILES:** `src/config.h`, `src/hal.cpp`, `src/hal.h`, `src/lua_vm.cpp`, `src/lua_scripts.cpp`, `src/lua_scripts.h`, `src/apps/settings.cpp`, `src/apps/settings.h`, `src/main.cpp`
+- **TARGET_FILES:** `src/config.h`, `src/hal.cpp`, `src/apps/settings.cpp`, `src/apps/settings.h`, `src/t9_predict.cpp`, `src/t9_predict.h`
 - **TRUTH_RELIANCE:**
   - `TRUTH_HARDWARE.md` Section 0 — ESP32-S2-Mini, 4MB Flash, 2MB PSRAM
-  - `TRUTH_HARDWARE.md` Section 0.1 — SPI bus: MOSI=GPIO 35, MISO=GPIO 37, SCK=GPIO 36
-  - `TRUTH_HARDWARE.md` Section 1 — LCD ST7920: CS=GPIO 38, shares MOSI+SCK on SPI bus
-  - `TRUTH_HARDWARE.md` Section 3 — SD card module: CS=GPIO 39, shares SPI bus
+  - `TRUTH_HARDWARE.md` Section 1 — LCD ST7920 128x64, backlight on GPIO 40 (PWM)
+  - `TRUTH_HARDWARE.md` Section 2 — Key matrix: 4×5, layout includes SHIFT, ALT, arrows, 0-9
 - **TECHNICAL_CONSTRAINTS:**
   - ESP32-S2-Mini: 4MB flash, 2MB PSRAM
-  - **Shared SPI bus** — LCD and SD card share MOSI (GPIO 35) and SCK (GPIO 36). SD card adds MISO (GPIO 37). Each device has its own CS (LCD=38, SD=39).
-  - **LCD must switch from SW_SPI to HW_SPI** — Currently `U8G2_ST7920_128X64_F_SW_SPI` bit-bangs GPIO pins. Once `SPI.begin()` claims pins for the hardware SPI peripheral, `digitalWrite()` no longer controls pin output. Both devices must use the hardware SPI peripheral with CS-based multiplexing. Constructor changes to `U8G2_ST7920_128X64_F_HW_SPI(U8G2_R0, PIN_CS)`.
-  - **SPI init order:** `SPI.begin(SCK, MISO, MOSI)` → `u8g2.begin()` → `SD.begin(SD_CS)`. U8G2 HW_SPI uses the already-configured Arduino SPI instance. Single-threaded loop — no SPI bus contention.
-  - **SD card partition: FAT32** — Most common SD card format. Arduino `SD.h` library (built-in to ESP32 Arduino framework, wraps `ff` FAT filesystem). No additional lib_deps needed.
-  - **Hot-plug safe:** SD card may be removed/inserted at any time. All SD operations must check mount status first, handle failures gracefully (return error, never crash), and allow re-mount.
-  - Lua VM (libLua) is already linked; `LuaVM` namespace has gfx/input/sys/t9 bindings
-  - Embedded Lua scripts are in `lua_scripts.cpp` — no SPIFFS (purged in previous milestone)
-  - Architecture: two C++ states (MODE_LUA ↔ MODE_SETTINGS) + Lua desktop (unchanged)
-  - Lua desktop currently shows a 4×2 empty grid — must be upgraded to show detected apps
-  - **Desktop app detection:** Each embedded Lua script that should appear on the desktop must have `--@DESKTOP:AppName` as its first line. C++ scans for this prefix and builds a registry. The desktop queries this registry to populate its grid.
+  - LCD: ST7920 128×64, backlight via LEDC PWM channel 0 (8-bit, 0-255)
+  - Key matrix: 4 rows × 5 cols. Special keys: ESC(27), BKSP(8), TAB(9), ENTER(13), SHIFT(14), ALT(15), UP(16), DOWN(17), LEFT(18), RIGHT(19)
+  - T9 dictionary: PROGMEM `t9_dict.h` — 705 digit sequences, 760 words, binary search via `T9Predict`
+  - T9 editor currently lives in `settings.cpp` as a submenu using `T9Predict` (predictive) + inline multi-tap (ABC mode)
+  - `T9Predict` only does exact-match lookup (digit sequence → words). No prefix matching exists.
+  - Key repeat infrastructure exists in `hal.cpp` via `isRepeating()` + `keyRepeatMap[]`
+  - Single-threaded 30 FPS loop; all state is global or in `SettingsApp` class
+  - Text buffer is Arduino `String` with byte-index cursor; newlines are `\n`
 
 - **ATOMIC_TASKS:**
 
-  - [x] TASK_1: Update `src/config.h` — add SD card CS pin and SPI bus pin constants
-    - Add `#define PIN_SD_CS 39` — SD card chip select (TRUTH_HARDWARE Section 3)
-    - Add `#define PIN_SPI_MISO 37` — MISO line for SD card (TRUTH_HARDWARE Section 0.1)
-    - Rename `PIN_SPI_SID` to `PIN_SPI_MOSI` for clarity (value stays 35)
-    - Keep `PIN_SPI_SCLK` = 36 (already defined)
-    - Keep `PIN_CS` = 38 (LCD chip select, already defined)
-    - Remove the "SD card pins — NOT YET WIRED" comment block
-    - Required Result: All SPI bus and SD card pins have named constants
+  - [x] TASK_1: Version bump + default brightness
+    - **`src/config.h`**: Change `FIRMWARE_VERSION` from `"1.1.0"` to `"1.1.1"`
+    - **`src/hal.cpp`**: Change `systemBrightness = 255` to `systemBrightness = 38` (15% of 255 ≈ 38)
+    - Required Result: Boot splash shows v1.1.1. Backlight starts at ~15%.
 
-  - [x] TASK_2: Update `src/hal.cpp` and `src/hal.h` — switch LCD to HW_SPI, init shared SPI bus, add SD card mount/unmount
-    - **hal.h changes:**
-      - Add `#include <SPI.h>` (needed for HW_SPI display type)
-      - Change display extern from `U8G2_ST7920_128X64_F_SW_SPI` to `U8G2_ST7920_128X64_F_HW_SPI`
-      - Add SD state exports:
-        ```cpp
-        bool mountSD();       // Attempt to (re)mount SD card, return success
-        void unmountSD();     // Safely unmount SD card
-        bool isSDMounted();   // Check current mount status
-        uint64_t sdTotalBytes();  // Total SD card space (0 if not mounted)
-        uint64_t sdUsedBytes();   // Used SD card space (0 if not mounted)
-        ```
-    - **hal.cpp changes:**
-      - Add `#include <SPI.h>` and `#include <SD.h>`
-      - Change display constructor:
-        ```cpp
-        U8G2_ST7920_128X64_F_HW_SPI u8g2(U8G2_R0, PIN_CS);
-        ```
-      - Add SD state:
-        ```cpp
-        static bool sdMounted = false;
-        ```
-      - In `setupHardware()`, BEFORE `u8g2.begin()`:
-        ```cpp
-        SPI.begin(PIN_SPI_SCLK, PIN_SPI_MISO, PIN_SPI_MOSI);
-        ```
-      - In `setupHardware()`, AFTER `u8g2.begin()`:
-        ```cpp
-        sdMounted = SD.begin(PIN_SD_CS);
-        if (sdMounted) Serial.println("[HAL] SD card mounted");
-        else Serial.println("[HAL] SD card not found");
-        ```
-      - Implement `mountSD()`:
-        ```cpp
-        bool mountSD() {
-            if (sdMounted) { SD.end(); sdMounted = false; }
-            sdMounted = SD.begin(PIN_SD_CS);
-            return sdMounted;
-        }
-        ```
-      - Implement `unmountSD()`:
-        ```cpp
-        void unmountSD() {
-            if (sdMounted) { SD.end(); sdMounted = false; }
-        }
-        ```
-      - Implement `isSDMounted()`: return `sdMounted`
-      - Implement `sdTotalBytes()`: return `sdMounted ? SD.totalBytes() : 0`
-      - Implement `sdUsedBytes()`: return `sdMounted ? SD.usedBytes() : 0`
-    - **CRITICAL:** This changes LCD communication from software bit-bang to hardware SPI. Must verify display still works after this change before proceeding to further tasks. If HW_SPI fails, fallback: manage SPI dynamically (`SPI.begin()`/`SPI.end()` around SD operations, keep SW_SPI for LCD).
-
-  - [ ] TASK_3: Add `sd` Lua module to `src/lua_vm.cpp`
-    - Add `#include <SD.h>` at top (for `File` type access)
-    - Register new `sd` Lua module in `init()` via `registerSDModule(L)`:
-      ```lua
-      sd.mount()           -- Attempt to mount SD card, return bool success
-      sd.unmount()         -- Safely unmount SD card
-      sd.isMounted()       -- Return bool: is SD card currently mounted
-      sd.list(path)        -- Return table: {{name="file.txt", isDir=false, size=1234}, ...}
-                           -- Returns nil, "SD not mounted" on failure
-      sd.exists(path)      -- Return bool: does file/dir exist on SD
-      sd.read(path)        -- Read entire file as string (max 32KB guard to prevent OOM)
-                           -- Returns nil, "error message" on failure
-      sd.info()            -- Return table: {total=bytes, used=bytes, free=bytes}
-                           -- Returns nil, "SD not mounted" if not mounted
-      sd.mkdir(path)       -- Create directory, return bool success
-      ```
-    - **Hot-plug safety:** Every sd.* function that accesses the card must:
-      1. Check `isSDMounted()` first — return nil + "SD not mounted" if false
-      2. If any SD.* call fails unexpectedly, call `unmountSD()` to mark as disconnected
-      3. Close all File handles before returning (even on error paths)
-      4. Return nil + error string on failure (never throw, never crash)
-    - `sd.list(path)` implementation:
+  - [x] TASK_2: Add prefix-matching to `T9Predict` for incremental word suggestion
+    - **`src/t9_predict.h`**: Add new public methods:
       ```cpp
-      if (!isSDMounted()) { lua_pushnil(L); lua_pushstring(L, "SD not mounted"); return 2; }
-      File dir = SD.open(path);
-      if (!dir || !dir.isDirectory()) {
-          if (dir) dir.close();
-          lua_pushnil(L); lua_pushstring(L, "not a directory"); return 2;
-      }
-      lua_newtable(L);
-      int idx = 1;
-      File entry = dir.openNextFile();
-      while (entry) {
-          lua_newtable(L);
-          lua_pushstring(L, entry.name()); lua_setfield(L, -2, "name");
-          lua_pushboolean(L, entry.isDirectory()); lua_setfield(L, -2, "isDir");
-          lua_pushinteger(L, entry.size()); lua_setfield(L, -2, "size");
-          lua_rawseti(L, -2, idx++);
-          entry.close();
-          entry = dir.openNextFile();
-      }
-      dir.close();
-      return 1;
+      int getPrefixCandidateCount() const;
+      const char* getPrefixCandidate(int index) const;
+      const char* getSelectedPrefixWord() const;
+      void nextPrefixCandidate();
+      void prevPrefixCandidate();
       ```
-    - `sd.read(path)` — Open file, check size ≤ 32768, read into buffer, push as Lua string, close. Return nil + error if file too large or open fails.
-    - Required Result: Lua scripts can safely browse and read SD card contents
-
-  - [ ] TASK_4: Add embedded Lua file manager script to `src/lua_scripts.cpp` and `src/lua_scripts.h`
-    - **lua_scripts.h:** Add `extern const char LUA_FILE_MANAGER[];`
-    - **lua_scripts.cpp:** Add `const char LUA_FILE_MANAGER[] = R"LUA(...)LUA";`
-    - **First line of LUA_FILE_MANAGER source must be:** `--@DESKTOP:Files`
-      This is the flag the desktop uses to detect it as a desktop app (see TASK_5).
-    - Script functionality:
-      - State: `currentPath` (starts at "/"), `entries` table, `selectedIndex`, `scrollOffset`
-      - `_init()`: check `sd.isMounted()`, if mounted call `refreshList()`
-      - `refreshList()`: call `sd.list(currentPath)`, sort dirs first then files, populate entries
-      - `_draw()`:
-        - Header bar (inverted): current path (truncated from left if too long)
-        - If SD not mounted: centered message "No SD card" + "TAB:Retry"
-        - If mounted: scrollable file list with ">" prefix for dirs, file size for files
-        - Scrollbar if entries exceed visible area (~4 lines)
-        - Footer: "ESC:Back BKSP:Up ENTER:Open"
-      - `_input(key)`:
-        - UP/DOWN: move selection, adjust scroll offset if needed
-        - ENTER on directory: append name + "/" to currentPath, refreshList()
-        - ENTER on file: (no action for now — future: view/run)
-        - BKSP: go up one directory level (strip last path component), refreshList()
-        - TAB: attempt `sd.mount()` + refreshList() (manual retry for hot-plug)
-        - ESC: set `_APP_EXIT = true` to signal return to desktop
-      - Error handling: wrap all sd.* calls, display error messages inline, never crash
-    - Required Result: A working read-only file browser for SD card contents
-
-  - [ ] TASK_5: Add app registry system + update desktop to detect and launch apps
-    - **lua_scripts.cpp:** Add app registry infrastructure:
+      Add private state:
       ```cpp
-      struct EmbeddedApp {
-          const char* name;     // Display name (extracted from --@DESKTOP:Name)
-          const char* source;   // Full Lua source code
-      };
-      
-      // All embedded scripts that could be apps:
-      static const char* ALL_SCRIPTS[] = { LUA_FILE_MANAGER /*, future scripts */ };
-      static const int ALL_SCRIPTS_COUNT = sizeof(ALL_SCRIPTS) / sizeof(ALL_SCRIPTS[0]);
-      
-      // Parsed at startup — only scripts with --@DESKTOP: prefix
-      static EmbeddedApp desktopApps[16];
-      static int desktopAppCount = 0;
-      
-      void initAppRegistry(); // Scan ALL_SCRIPTS for --@DESKTOP: prefix, populate desktopApps
-      int getDesktopAppCount();
-      const EmbeddedApp* getDesktopApp(int index);
+      int prefixCandidateCount;
+      int prefixSelectedIdx;
+      // Flat array of index positions for prefix matches (max 64 entries)
+      struct PrefixMatch { int indexPos; int wordIdx; };
+      PrefixMatch prefixMatches[64];
+      void updatePrefixCandidates();
       ```
-      - `initAppRegistry()` iterates ALL_SCRIPTS, checks if first line starts with `--@DESKTOP:`, extracts name after colon (trimmed), adds to desktopApps array.
-    - **lua_scripts.h:** Add struct definition, `initAppRegistry()`, `getDesktopAppCount()`, `getDesktopApp()` declarations
-    - **lua_vm.cpp:** Add `scripts` Lua module registered in `init()`:
-      ```lua
-      scripts.count()         -- Return number of desktop apps (int)
-      scripts.getName(index)  -- Return name of app at 1-based index (string)
-      scripts.load(index)     -- Execute app source code in current Lua state, return bool success
-      ```
-      - `scripts.load(index)` calls `LuaVM::executeString(app->source, app->name)` internally
-    - **main.cpp:** Call `initAppRegistry()` in `setup()` after serial init (before LuaVM::init is fine)
-    - **lua_scripts.cpp:** Rewrite `LUA_DESKTOP` to use the app registry:
-      - `_init()`: query `scripts.count()` and build list of app names
-      - List-based layout (not grid) — show app names in a scrollable vertical list
-      - If no apps: show "No apps found"
-      - ENTER on selected app:
-        1. Save desktop callbacks: `desktop_draw = _draw; desktop_update = _update; desktop_input = _input`
-        2. Call `scripts.load(selectedIndex)` — which redefines _draw/_update/_input globals
-        3. If load fails: restore desktop callbacks, show error
-      - `_update()`: check `_APP_EXIT` flag — if true, restore desktop callbacks and clear flag
-      - Footer: "ESC:Settings ENTER:Open"
-      - UP/DOWN: navigate app list
-    - Required Result: Desktop shows "Files" app, ENTER launches it, ESC from app returns to desktop
+    - **`src/t9_predict.cpp`**: Implement `updatePrefixCandidates()`:
+      - Scan `t9_index[]` for all entries whose key starts with the current digits
+      - A key K starts with digits D if: K divided by 10^(len(K)-len(D)) == D (integer math)
+      - Collect up to 64 (indexPos, wordIdx) pairs into `prefixMatches[]`
+      - Priority: exact-length matches first (sorted by frequency/position), then longer matches
+      - For each prefix match, take only the first word (index 0) from that sequence to keep the list manageable
+      - Call `updatePrefixCandidates()` from `updateCandidates()` after the exact-match search
+    - **`src/t9_predict.cpp`**: Implement `getPrefixCandidate(int index)`:
+      - Look up `prefixMatches[index]`, read word from `t9_word_pool` at that position
+      - Return the word truncated/represented at the current digit length (i.e., show only the first N chars where N = digitCount)
+      - Actually: return the FULL candidate word — the editor will decide how to display it
+    - **`src/t9_predict.cpp`**: Implement cycling: `nextPrefixCandidate()`, `prevPrefixCandidate()`, `getSelectedPrefixWord()`
+    - Required Result: After pushing digits "842", `getPrefixCandidate(0)` returns "that" (or the best prefix match). `getCandidateCount()` still works for exact matches. Both APIs coexist.
+
+  - [x] TASK_3: T9 mode shows letter-priority preview instead of digits
+    - **`src/apps/settings.cpp`** in `t9HandleInput()` and `renderT9Editor()`:
+      - When in T9 predictive mode and digits are entered, the preview text should show the best prefix word truncated to `digitCount` characters, NOT the raw digit sequence
+      - Logic: if `t9predict.getPrefixCandidateCount() > 0`, get `getSelectedPrefixWord()`, take first `digitCount` chars as preview
+      - If no prefix candidates exist at all, fall back to showing raw digits (number mode)
+      - UP/DOWN in T9 mode cycles `nextPrefixCandidate()`/`prevPrefixCandidate()` (replaces exact-match cycling)
+      - ENTER in T9 mode: if prefix candidates exist, commit the prefix word truncated to `digitCount` chars. If no candidates, commit the raw digits as literal text.
+    - Required Result: Typing 8-4-2 shows "tha" (not "842"). Typing 8-4-2-8 shows "that". If digits have no dictionary prefix match, show digits.
+
+  - [x] TASK_4: Cursor movement / space / newline / arrows commit the in-progress T9 word
+    - **`src/apps/settings.cpp`** in `t9HandleInput()`:
+      - LEFT, RIGHT, UP, DOWN, TAB (newline), KEY_ENTER: if T9 prediction is active (`t9predict.hasInput()`), commit the current preview word (truncated to digitCount) before performing the navigation/insertion action
+      - 0 (space): commit current T9 word, THEN insert space (current behavior already does this for exact match — update to use prefix-based commit)
+      - After commit, `t9predict.reset()` so new word entry starts fresh
+    - Required Result: Moving cursor mid-word finalizes whatever letters are shown. No word "follows" the cursor.
+
+  - [x] TASK_5: Three-mode SHIFT cycling (lower → First Cap → ALL CAPS)
+    - **`src/apps/settings.h`**: Add `int t9ShiftMode;` (0=lower, 1=firstCap, 2=allCaps). Remove `bool t9Shifted;`.
+    - **`src/apps/settings.cpp`**:
+      - SHIFT key: cycle `t9ShiftMode = (t9ShiftMode + 1) % 3`
+      - When committing T9 prediction: mode 0 = all lowercase, mode 1 = capitalize first letter, mode 2 = all uppercase
+      - When committing multi-tap (ABC mode): mode 0 = lowercase char, mode 1 = uppercase current char, mode 2 = uppercase current char
+      - Update `t9GetMultiTapChar()` to use `t9ShiftMode` instead of `t9Shifted`
+      - Update `renderT9Editor()` header: show "abc"/"Abc"/"ABC" for shift indicator instead of "^"
+    - Required Result: SHIFT cycles through three states visually indicated in header.
+
+  - [x] TASK_6: Button 1 in T9 mode behaves like ABC mode (symbol cycling)
+    - **`src/apps/settings.cpp`** in `t9HandleInput()`:
+      - In T9 predictive mode, when key '1' is pressed:
+        - If T9 prediction is active, commit current word first
+        - Then enter a temporary multi-tap cycle for key '1' using `multiTapMap[1]` = `".,?!1"`
+        - Use the same `t9TapKey`/`t9TapIndex`/`t9TapTime` mechanism already used by ABC mode
+        - On timeout or different key, commit the symbol
+      - Currently key '1' just inserts "." — replace with full multi-tap cycling
+    - Required Result: In T9 mode, pressing 1 cycles through `.` `,` `?` `!` `1` with multi-tap timing.
+
+  - [x] TASK_7: Allow cursor UP and DOWN movement in T9 editor
+    - **`src/apps/settings.cpp`** in `t9HandleInput()`:
+      - Currently UP/DOWN only cycle T9 candidates. Change: when T9 has NO active input (`!t9predict.hasInput()` and no pending multi-tap), UP/DOWN move cursor vertically
+      - Implement vertical cursor movement: find current line (scan t9Text for `\n` boundaries), move to same column on adjacent line
+      - When T9 IS active, UP/DOWN still cycle candidates (existing behavior for exact match, updated to prefix cycling per TASK_3)
+    - **`src/apps/settings.cpp`** in `renderT9Editor()`:
+      - Ensure scroll offset adjusts when cursor moves vertically (auto-scroll to keep cursor visible)
+    - Required Result: Arrow keys navigate freely when no word is being composed.
+
+  - [x] TASK_8: Ensure newline is `\n` in buffer; UTF-8 encoding on read/write (verified — already correct)
+    - **`src/apps/settings.cpp`**:
+      - Verify TAB key inserts literal `'\n'` (currently does: `t9Text.substring(0,t9Cursor) + "\n" + ...`) — CONFIRMED OK
+      - Arduino `String` is already byte-oriented (UTF-8 pass-through). No conversion needed for ASCII/Latin content.
+      - Ensure that when `t9Text` is read from or written to `appTransferString`, no character mangling occurs (no `\r\n` conversion, no encoding issues)
+      - This task is primarily verification — if current code already handles `\n` correctly, mark as pass. If any `\r` appears, strip it.
+    - Required Result: Buffer uses `\n` for newlines, UTF-8 bytes pass through unmodified.
+
+  - [x] TASK_9: Remove redundant digit display from T9 editor footer
+    - **`src/apps/settings.cpp`** in `renderT9Editor()`:
+      - In the candidate bar section, remove the right-aligned digit sequence display:
+        ```cpp
+        // REMOVE these lines:
+        const char* digs = t9predict.getDigits();
+        int dw = u8g2.getStrWidth(digs);
+        u8g2.drawStr(128 - dw - 1, 62, digs);
+        ```
+      - Keep the left-aligned candidate word + index display
+    - Required Result: Footer shows only the word suggestion and index, no redundant digit string on the right.
+
+  - [x] TASK_10: Make arrow keys, backspace, and Enter repeatable
+    - **`src/hal.cpp`** in `keyRepeatMap[][]`:
+      - Change ENTER from `false` to `true` (row 1, col 4)
+      - BKSP is already `true` (row 0, col 4)
+      - UP is already `true` (row 2, col 4)
+      - DOWN is already `true` (row 3, col 4)
+      - LEFT is already `true` (row 3, col 1)
+      - RIGHT is already `true` (row 3, col 3)
+      - Verify current values; only ENTER needs changing
+    - Required Result: Holding ENTER, arrows, or backspace triggers key repeat after 400ms delay at 100ms rate.
+
+  - [x] TASK_11: ENTER in T9 mode commits word even with no dictionary match
+    - **`src/apps/settings.cpp`** in `t9HandleInput()` for KEY_ENTER:
+      - Current: if T9 has input but no candidate, nothing happens (no commit)
+      - New: if `t9predict.hasInput()` and `getPrefixCandidateCount() == 0`, commit the raw digit string as literal text
+      - This ensures the user can always "accept" whatever is shown (letters if match exists, digits if no match)
+    - Required Result: Pressing ENTER always commits the current preview, whether it's a word or digits.
+
+  - [x] TASK_12: ALT cycles between T9, ABC, and 123 modes
+    - **`src/apps/settings.h`**: Add `enum T9InputMode { MODE_T9, MODE_ABC, MODE_123 }; T9InputMode t9InputMode;`. Remove `bool t9MultiTap;`.
+    - **`src/apps/settings.cpp`**:
+      - ALT key: cycle `t9InputMode` through `MODE_T9 → MODE_ABC → MODE_123 → MODE_T9`
+      - Commit any pending input before switching (existing behavior)
+      - `MODE_T9`: predictive mode (current non-multiTap behavior, updated per TASK_2/3)
+      - `MODE_ABC`: multi-tap letter mode (current multiTap behavior)
+      - `MODE_123`: direct digit insertion — pressing 0-9 immediately inserts that digit character. No multi-tap, no prediction. SHIFT/cycling irrelevant.
+      - Update `renderT9Editor()` header to show "T9"/"ABC"/"123" for current mode
+      - Update footer hints per mode
+      - Replace all `t9MultiTap` checks with `t9InputMode == MODE_ABC` (or appropriate mode check)
+    - Required Result: ALT cycles through three input modes, each with distinct behavior.
+
+  - [ ] VERIFICATION: Compile + functional test
+    - `pio run -e lolin_s2_mini` — zero errors, zero warnings (or only benign warnings)
+    - Flash to device via `bash scripts/flash.sh`
+    - **Test checklist:**
+      1. Boot shows v1.1.1, screen starts at ~15% brightness
+      2. Settings → Backlight starts at 15%
+      3. T9 Editor: T9 mode — type 8-4-2-8 → preview shows "t","th","tha","that" progressively
+      4. T9 Editor: pressing arrow/space/enter mid-word commits current preview
+      5. T9 Editor: SHIFT cycles lower→Abc→ABC (visible in header)
+      6. T9 Editor: key 1 in T9 mode cycles symbols (.,?!1)
+      7. T9 Editor: UP/DOWN arrows move cursor between lines when no word active
+      8. T9 Editor: newline inserts \n, text displays correctly
+      9. T9 Editor: no digit string on right side of footer
+      10. T9 Editor: ENTER commits digits as text when no dictionary match
+      11. T9 Editor: ALT cycles T9→ABC→123
+      12. Arrow keys + BKSP + ENTER repeat when held
 
   - [ ] TASK_6: Update `src/apps/settings.cpp` — show SD card mount status and space info
     - In `renderSettingsList()`, modify the system info line (currently "RAM XXk") to include SD status:

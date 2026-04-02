@@ -3,7 +3,7 @@
 // MODULE: src/hal.cpp
 // STATUS: [Level 2 - Implementation]
 // TRUTH_LINK: TRUTH_HARDWARE.md Sections 0, 0.1, 1, 2, 3
-// LOG_REF: 2026-03-30
+// LOG_REF: 2026-04-01
 //
 
 #include "hal.h"
@@ -19,7 +19,7 @@ const uint8_t* FONT_SMALL = u8g2_font_5x7_t_cyrillic;
 
 // Global Settings
 int systemContrast = DEFAULT_CONTRAST;
-int systemBrightness = 255;  // Default full brightness (0-255)
+int systemBrightness = 38;  // Default ~15% brightness (0-255)
 
 // --------------------------------------------------------------------------
 // SD CARD STATE
@@ -54,9 +54,9 @@ char keyMap[ROWS][COLS] = {
 // true = key will auto-repeat when held (non-T9 keys only)
 bool keyRepeatMap[ROWS][COLS] = {
   {false, false, false, false, true },  // ESC, 1, 2, 3, BKSP
-  {false, false, false, false, false},  // TAB, 4, 5, 6, ENTER
+  {false, false, false, false, true },  // TAB, 4, 5, 6, ENTER
   {false, false, false, false, true },  // SHIFT, 7, 8, 9, UP
-  {false, true,  false, true,  true }   // ALT, LEFT, 0, RIGHT, DOWN
+  {false, true,  true,  true,  true }   // ALT, LEFT, 0, RIGHT, DOWN
 };
 
 char activeKeys[MAX_PRESSED_KEYS];
@@ -74,10 +74,14 @@ struct KeyRepeatState {
     unsigned long pressStartTime;
     unsigned long lastRepeatTime;
     bool initialDelayPassed;
+    bool longPressFired;          // One-shot flag for isLongPressed()
 };
 
 static KeyRepeatState repeatStates[MAX_PRESSED_KEYS];
 static int repeatStateCount = 0;
+
+// Forward declaration — called from scanMatrix(), defined in key repeat section
+static void updateRepeatStates();
 
 // --------------------------------------------------------------------------
 // HARDWARE SETUP
@@ -237,6 +241,12 @@ void scanMatrix() {
 
   // Reset latch for next inter-frame period
   latchedKeyCount = 0;
+
+  // Update repeat states once per frame (must run here, not inside
+  // isRepeating(), because short-circuit evaluation of
+  // isJustPressed(key) || isRepeating(key) would skip the call on
+  // the first frame of a keypress, preventing state creation).
+  updateRepeatStates();
 }
 
 bool isJustPressed(char key) {
@@ -284,6 +294,7 @@ static KeyRepeatState* getRepeatState(char key) {
         state->pressStartTime = millis();
         state->lastRepeatTime = 0;
         state->initialDelayPassed = false;
+        state->longPressFired = false;
         return state;
     }
     return nullptr;
@@ -319,20 +330,31 @@ static void updateRepeatStates() {
         }
     }
     
-    // Add states for newly pressed repeatable keys
+    // Add states for ALL newly pressed keys (not just repeatable ones)
+    // so isKeyHeld() works universally (e.g. digit long-press detection).
     for (int i = 0; i < activeKeyCount; i++) {
         char key = activeKeys[i];
-        if (isKeyRepeatable(key)) {
-            // Check if this is a new press
-            bool wasPressed = false;
-            for (int j = 0; j < prevKeyCount; j++) {
-                if (prevActiveKeys[j] == key) {
-                    wasPressed = true;
-                    break;
-                }
+        // Check if this is a new press
+        bool wasPressed = false;
+        for (int j = 0; j < prevKeyCount; j++) {
+            if (prevActiveKeys[j] == key) {
+                wasPressed = true;
+                break;
             }
-            if (!wasPressed) {
-                getRepeatState(key);  // Creates new state
+        }
+        if (!wasPressed) {
+            getRepeatState(key);  // Creates new state
+        }
+    }
+    
+    // Update initialDelayPassed for ALL tracked keys (not just repeatable ones).
+    // isRepeating() only processes repeatable keys, so without this, non-repeatable
+    // keys (digits) would never get initialDelayPassed set — breaking isLongPressed().
+    unsigned long now = millis();
+    for (int i = 0; i < repeatStateCount; i++) {
+        if (!repeatStates[i].initialDelayPassed) {
+            if (now - repeatStates[i].pressStartTime >= KEY_REPEAT_DELAY_MS) {
+                repeatStates[i].initialDelayPassed = true;
             }
         }
     }
@@ -342,10 +364,7 @@ static void updateRepeatStates() {
 bool isRepeating(char key) {
     if (!isKeyRepeatable(key)) return false;
     
-    // Update states first
-    updateRepeatStates();
-    
-    // Find the repeat state
+    // Find the repeat state (updateRepeatStates already called by scanMatrix)
     KeyRepeatState* state = nullptr;
     for (int i = 0; i < repeatStateCount; i++) {
         if (repeatStates[i].key == key) {
@@ -375,5 +394,33 @@ bool isRepeating(char key) {
         return true;
     }
     
+    return false;
+}
+
+// Read-only query: has a key been held past the initial repeat delay?
+// Unlike isRepeating(), this does NOT consume/update any timing state.
+bool isKeyHeld(char key) {
+    for (int i = 0; i < repeatStateCount; i++) {
+        if (repeatStates[i].key == key) {
+            return repeatStates[i].initialDelayPassed;
+        }
+    }
+    return false;
+}
+
+// One-shot long-press detection: returns true exactly ONCE when a key
+// has been held past KEY_REPEAT_DELAY_MS. Works for all keys (including
+// non-repeatable ones like digit keys). After firing, will not fire again
+// until the key is released and re-pressed.
+bool isLongPressed(char key) {
+    for (int i = 0; i < repeatStateCount; i++) {
+        if (repeatStates[i].key == key) {
+            if (repeatStates[i].initialDelayPassed && !repeatStates[i].longPressFired) {
+                repeatStates[i].longPressFired = true;
+                return true;
+            }
+            return false;
+        }
+    }
     return false;
 }

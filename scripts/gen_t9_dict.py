@@ -248,9 +248,9 @@ def emit_header(sorted_groups, out=sys.stdout):
     # Index entry struct
     out.write('struct T9IndexEntry {\n')
     out.write('    uint32_t key;      // Digit sequence as decimal (e.g., "4663" = 4663)\n')
-    out.write('    uint16_t offset;   // Byte offset into t9_word_pool\n')
+    out.write('    uint32_t offset;   // Byte offset into t9_word_pool\n')
     out.write('    uint8_t  count;    // Number of words for this sequence\n')
-    out.write('    uint8_t  _pad;\n')
+    out.write('    uint8_t  _pad[3];\n')
     out.write('};\n\n')
     
     # Word pool
@@ -277,9 +277,28 @@ def emit_header(sorted_groups, out=sys.stdout):
         out.write(f'    {{{key}, {offset}, {count}, 0}},  // "{digit_str}" -> "{first_word}"...\n')
     out.write('};\n\n')
     
-    out.write(f'const uint16_t T9_INDEX_COUNT = {len(index_entries)};\n')
-    out.write(f'const uint16_t T9_WORD_POOL_SIZE = {len(word_pool)};\n\n')
+    out.write(f'const uint32_t T9_INDEX_COUNT = {len(index_entries)};\n')
+    out.write(f'const uint32_t T9_WORD_POOL_SIZE = {len(word_pool)};\n\n')
     out.write('#endif // T9_DICT_DATA_H\n')
+
+
+# Lua keywords and standard library identifiers useful for T9 prediction
+LUA_WORDS = """
+and break do else elseif end false for function goto if in local nil not or
+repeat return then true until while
+assert error ipairs load next pairs pcall print require select type xpcall
+tonumber tostring rawequal rawget rawlen rawset
+setmetatable getmetatable collectgarbage dofile loadfile
+byte char dump find format gmatch gsub len lower match rep reverse sub upper
+concat insert move pack remove sort unpack
+abs acos asin atan ceil cos deg exp floor fmod huge log max min modf rad
+random seed sin sqrt tan
+close flush input lines open output read write tmpfile
+clock date difftime execute exit getenv rename
+coroutine create resume wrap yield status running
+debug getinfo getlocal getupvalue sethook setlocal setupvalue
+traceback
+""".split()
 
 
 def main():
@@ -289,9 +308,20 @@ def main():
             words = [line.strip().lower() for line in f if line.strip()]
         print(f'// Source: {sys.argv[1]} ({len(words)} input words)', file=sys.stderr)
     else:
-        # Use built-in frequency list
-        words = BUILTIN_WORDS
-        print(f'// Source: built-in ({len(words)} input words)', file=sys.stderr)
+        # Use built-in frequency list + system dictionary + Lua keywords
+        words = list(BUILTIN_WORDS)  # Priority: built-in common words first
+        words.extend(LUA_WORDS)      # Then Lua keywords
+        # Append system dictionary if available
+        sys_dict = '/usr/share/dict/words'
+        if os.path.isfile(sys_dict):
+            with open(sys_dict) as f:
+                for line in f:
+                    w = line.strip().lower()
+                    if w.isalpha() and 2 <= len(w) <= 15:
+                        words.append(w)
+            print(f'// Source: built-in + lua + {sys_dict}', file=sys.stderr)
+        else:
+            print(f'// Source: built-in + lua (no system dict found)', file=sys.stderr)
     
     sorted_groups = generate_dict(words)
     emit_header(sorted_groups)

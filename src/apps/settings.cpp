@@ -55,6 +55,11 @@ SettingsApp::SettingsApp() {
     lastPressedKey = ' ';
     for (int i = 0; i < HISTORY_SIZE; i++) keyHistory[i] = ' ';
     keyHistory[HISTORY_SIZE] = '\0';
+    inLcdTest = false;
+    lcdTestStep = 0;
+    inSdTest = false;
+    sdTestRan = false;
+    sdTestLineCount = 0;
     t9EditorReset();
 }
 
@@ -64,6 +69,10 @@ void SettingsApp::start() {
     editMode = false;
     inKeyTester = false;
     inT9Editor = false;
+    inLcdTest = false;
+    lcdTestStep = 0;
+    inSdTest = false;
+    sdTestRan = false;
     selectedIndex = 0;
 }
 
@@ -72,10 +81,12 @@ void SettingsApp::stop() {
     sleepEnabled = tempSleepEnabled;
     inKeyTester = false;
     inT9Editor = false;
+    inLcdTest = false;
+    inSdTest = false;
 }
 
 bool SettingsApp::isInSubmenu() {
-    return inKeyTester || inT9Editor;
+    return inKeyTester || inT9Editor || inLcdTest || inSdTest;
 }
 
 void SettingsApp::update() {
@@ -118,6 +129,30 @@ void SettingsApp::handleInput(char key) {
         return;
     }
 
+    if (inLcdTest) {
+        if (key == KEY_ESC) {
+            inLcdTest = false;
+        } else if (key == KEY_ENTER || key == KEY_RIGHT || key == KEY_DOWN) {
+            lcdTestStep++;
+            if (lcdTestStep >= LCD_TEST_COUNT) {
+                inLcdTest = false;
+            }
+        } else if (key == KEY_LEFT || key == KEY_UP) {
+            if (lcdTestStep > 0) lcdTestStep--;
+        }
+        return;
+    }
+
+    if (inSdTest) {
+        if (key == KEY_ESC || key == KEY_ENTER) {
+            inSdTest = false;
+        } else if (key == KEY_RIGHT || key == KEY_DOWN) {
+            // Re-run the test
+            sdTestRan = false;
+        }
+        return;
+    }
+
     if (inT9Editor) {
         t9HandleInput(key);
         return;
@@ -140,6 +175,12 @@ void SettingsApp::handleInput(char key) {
             } else if (selectedIndex == SETTING_T9_EDITOR) {
                 inT9Editor = true;
                 t9EditorReset();
+            } else if (selectedIndex == SETTING_LCD_TEST) {
+                inLcdTest = true;
+                lcdTestStep = 0;
+            } else if (selectedIndex == SETTING_SD_TEST) {
+                inSdTest = true;
+                sdTestRan = false;
             } else {
                 editMode = true;
             }
@@ -192,81 +233,92 @@ void SettingsApp::renderSettingsList() {
     renderInfoHeader();
     GUI::setFontSmall();
     
-    int y = GUI::CONTENT_START_Y;
+    // Total items: SETTING_COUNT selectable + 1 info line
+    const int totalItems = SETTING_COUNT + 1;  // +1 for info line
+    const int maxVisible = 4;  // Content area fits 4 lines
     
-    // Brightness
-    {
-        bool isSelected = (selectedIndex == SETTING_BRIGHTNESS);
-        if (isSelected && !editMode) {
-            u8g2.drawBox(0, y - 8, GUI::SCREEN_WIDTH - 4, GUI::LINE_HEIGHT);
-            u8g2.setDrawColor(0);
-        }
-        char buf[32];
-        int pct = (tempBrightness * 100) / 255;
-        if (editMode && isSelected) {
-            snprintf(buf, sizeof(buf), "Backlight: <%d%%>", pct);
-        } else {
-            snprintf(buf, sizeof(buf), "Backlight: %d%%", pct);
-        }
-        u8g2.drawStr(2, y, buf);
-        if (isSelected && !editMode) u8g2.setDrawColor(1);
+    // Calculate scroll offset to keep selection visible
+    int scrollOff = 0;
+    if (selectedIndex >= maxVisible) {
+        scrollOff = selectedIndex - maxVisible + 1;
     }
-    y += GUI::LINE_HEIGHT;
-    
-    // Sleep
-    {
-        bool isSelected = (selectedIndex == SETTING_SLEEP);
-        if (isSelected && !editMode) {
-            u8g2.drawBox(0, y - 8, GUI::SCREEN_WIDTH - 4, GUI::LINE_HEIGHT);
-            u8g2.setDrawColor(0);
-        }
-        char buf[32];
-        if (editMode && isSelected) {
-            snprintf(buf, sizeof(buf), "Sleep: <%s>", tempSleepEnabled ? "ON" : "OFF");
-        } else {
-            snprintf(buf, sizeof(buf), "Sleep: %s", tempSleepEnabled ? "ON" : "OFF");
-        }
-        u8g2.drawStr(2, y, buf);
-        if (isSelected && !editMode) u8g2.setDrawColor(1);
+    // Clamp so we can always see totalItems
+    if (scrollOff > totalItems - maxVisible) {
+        scrollOff = totalItems - maxVisible;
     }
-    y += GUI::LINE_HEIGHT;
-    
-    // Key Tester
-    {
-        bool isSelected = (selectedIndex == SETTING_KEY_TESTER);
-        if (isSelected) {
-            u8g2.drawBox(0, y - 8, GUI::SCREEN_WIDTH - 4, GUI::LINE_HEIGHT);
-            u8g2.setDrawColor(0);
-        }
-        u8g2.drawStr(2, y, "Key Tester...");
-        if (isSelected) u8g2.setDrawColor(1);
-    }
-    y += GUI::LINE_HEIGHT;
+    if (scrollOff < 0) scrollOff = 0;
 
-    // T9 Editor
-    {
-        bool isSelected = (selectedIndex == SETTING_T9_EDITOR);
-        if (isSelected) {
+    for (int vis = 0; vis < maxVisible && (scrollOff + vis) < totalItems; vis++) {
+        int idx = scrollOff + vis;
+        int y = GUI::CONTENT_START_Y + vis * GUI::LINE_HEIGHT;
+        bool isSelected = (idx == selectedIndex);
+        char buf[40];
+
+        // Info line is at index SETTING_COUNT (not selectable)
+        if (idx == SETTING_COUNT) {
+            int freeRamK = ESP.getFreeHeap() / 1024;
+            if (isSDMounted()) {
+                uint64_t totalMB = sdTotalBytes() / (1024*1024);
+                uint64_t usedMB = sdUsedBytes() / (1024*1024);
+                snprintf(buf, sizeof(buf), "RAM %dk SD %llu/%lluM", freeRamK, (unsigned long long)usedMB, (unsigned long long)totalMB);
+            } else {
+                snprintf(buf, sizeof(buf), "RAM %dk SD:none", freeRamK);
+            }
+            u8g2.drawStr(2, y, buf);
+            continue;
+        }
+
+        // Draw selection highlight for non-edit items
+        bool highlightSel = isSelected && !editMode;
+        // For edit-mode items, highlight only when not editing
+        if (highlightSel) {
             u8g2.drawBox(0, y - 8, GUI::SCREEN_WIDTH - 4, GUI::LINE_HEIGHT);
             u8g2.setDrawColor(0);
         }
-        u8g2.drawStr(2, y, "T9 Editor...");
-        if (isSelected) u8g2.setDrawColor(1);
-    }
-    y += GUI::LINE_HEIGHT;
-    
-    // System info line (read-only, not selectable)
-    {
-        int freeRamK = ESP.getFreeHeap() / 1024;
-        char buf[40];
-        if (isSDMounted()) {
-            uint64_t totalMB = sdTotalBytes() / (1024*1024);
-            uint64_t usedMB = sdUsedBytes() / (1024*1024);
-            snprintf(buf, sizeof(buf), "RAM %dk SD %llu/%lluM", freeRamK, (unsigned long long)usedMB, (unsigned long long)totalMB);
-        } else {
-            snprintf(buf, sizeof(buf), "RAM %dk SD:none", freeRamK);
+
+        switch ((SettingItem)idx) {
+        case SETTING_BRIGHTNESS: {
+            int pct = (tempBrightness * 100) / 255;
+            if (editMode && isSelected)
+                snprintf(buf, sizeof(buf), "Backlight: <%d%%>", pct);
+            else
+                snprintf(buf, sizeof(buf), "Backlight: %d%%", pct);
+            break;
         }
+        case SETTING_SLEEP:
+            if (editMode && isSelected)
+                snprintf(buf, sizeof(buf), "Sleep: <%s>", tempSleepEnabled ? "ON" : "OFF");
+            else
+                snprintf(buf, sizeof(buf), "Sleep: %s", tempSleepEnabled ? "ON" : "OFF");
+            break;
+        case SETTING_KEY_TESTER:
+            snprintf(buf, sizeof(buf), "Key Tester...");
+            break;
+        case SETTING_T9_EDITOR:
+            snprintf(buf, sizeof(buf), "T9 Editor...");
+            break;
+        case SETTING_LCD_TEST:
+            snprintf(buf, sizeof(buf), "LCD Test...");
+            break;
+        case SETTING_SD_TEST:
+            snprintf(buf, sizeof(buf), "SD Pin Test...");
+            break;
+        default:
+            buf[0] = '\0';
+        }
+
         u8g2.drawStr(2, y, buf);
+        if (highlightSel) u8g2.setDrawColor(1);
+    }
+    
+    // Scroll indicators
+    if (scrollOff > 0) {
+        u8g2.setFont(u8g2_font_4x6_tf);
+        u8g2.drawStr(120, GUI::CONTENT_START_Y - 2, "^");
+    }
+    if (scrollOff + maxVisible < totalItems) {
+        u8g2.setFont(u8g2_font_4x6_tf);
+        u8g2.drawStr(120, GUI::CONTENT_START_Y + maxVisible * GUI::LINE_HEIGHT - 4, "v");
     }
 }
 
@@ -311,9 +363,293 @@ void SettingsApp::render() {
         renderKeyTester();
     } else if (inT9Editor) {
         renderT9Editor();
+    } else if (inLcdTest) {
+        renderLcdTest();
+    } else if (inSdTest) {
+        renderSdTest();
     } else {
         renderSettingsList();
     }
+}
+
+// --------------------------------------------------------------------------
+// LCD TEST SUBMENU
+// --------------------------------------------------------------------------
+
+void SettingsApp::renderLcdTest() {
+    char stepBuf[16];
+    snprintf(stepBuf, sizeof(stepBuf), "%d/%d", lcdTestStep + 1, LCD_TEST_COUNT);
+
+    switch (lcdTestStep) {
+
+    case 0: {
+        // All pixels ON (full fill)
+        u8g2.drawBox(0, 0, 128, 64);
+        u8g2.setDrawColor(0);
+        u8g2.setFont(u8g2_font_5x7_tf);
+        u8g2.drawStr(2, 8, "ALL PIXELS ON");
+        u8g2.drawStr(108, 8, stepBuf);
+        u8g2.drawStr(36, 63, "Enter:Next");
+        u8g2.setDrawColor(1);
+        break;
+    }
+
+    case 1: {
+        // All horizontal lines
+        for (int y = 0; y < 64; y++) {
+            u8g2.drawHLine(0, y, 128);
+        }
+        u8g2.setDrawColor(0);
+        u8g2.drawBox(0, 0, 128, 9);
+        u8g2.drawBox(0, 56, 128, 8);
+        u8g2.setDrawColor(1);
+        u8g2.setFont(u8g2_font_5x7_tf);
+        u8g2.drawBox(0, 0, 128, 9);
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(2, 8, "ALL HLINES");
+        u8g2.drawStr(108, 8, stepBuf);
+        u8g2.setDrawColor(1);
+        u8g2.drawStr(36, 63, "Enter:Next");
+        break;
+    }
+
+    case 2: {
+        // Even rows only
+        for (int y = 0; y < 64; y += 2) {
+            u8g2.drawHLine(0, y, 128);
+        }
+        u8g2.setFont(u8g2_font_5x7_tf);
+        u8g2.drawBox(0, 0, 128, 9);
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(2, 8, "EVEN ROWS");
+        u8g2.drawStr(108, 8, stepBuf);
+        u8g2.setDrawColor(1);
+        u8g2.drawStr(36, 63, "Enter:Next");
+        break;
+    }
+
+    case 3: {
+        // Odd rows only
+        for (int y = 1; y < 64; y += 2) {
+            u8g2.drawHLine(0, y, 128);
+        }
+        u8g2.setFont(u8g2_font_5x7_tf);
+        u8g2.drawBox(0, 0, 128, 9);
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(2, 8, "ODD ROWS");
+        u8g2.drawStr(108, 8, stepBuf);
+        u8g2.setDrawColor(1);
+        u8g2.drawStr(36, 63, "Enter:Next");
+        break;
+    }
+
+    case 4: {
+        // 8-pixel bands with row numbers
+        u8g2.setFont(u8g2_font_4x6_tf);
+        for (int band = 0; band < 8; band++) {
+            int y0 = band * 8;
+            if (band % 2 == 0) {
+                u8g2.drawBox(0, y0, 128, 8);
+                u8g2.setDrawColor(0);
+                char buf[8];
+                snprintf(buf, sizeof(buf), "%d-%d", y0, y0 + 7);
+                u8g2.drawStr(2, y0 + 7, buf);
+                u8g2.setDrawColor(1);
+            } else {
+                char buf[8];
+                snprintf(buf, sizeof(buf), "%d-%d", y0, y0 + 7);
+                u8g2.drawStr(2, y0 + 7, buf);
+            }
+        }
+        break;
+    }
+
+    case 5: {
+        // 1px checkerboard
+        for (int y = 0; y < 64; y++) {
+            for (int x = 0; x < 128; x++) {
+                if ((x + y) % 2 == 0) u8g2.drawPixel(x, y);
+            }
+        }
+        break;
+    }
+
+    case 6: {
+        // 8px grid
+        for (int y = 0; y < 64; y += 8) u8g2.drawHLine(0, y, 128);
+        for (int x = 0; x < 128; x += 8) u8g2.drawVLine(x, 0, 64);
+        u8g2.setFont(u8g2_font_5x7_tf);
+        u8g2.drawBox(0, 0, 128, 9);
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(2, 8, "8px GRID");
+        u8g2.drawStr(108, 8, stepBuf);
+        u8g2.setDrawColor(1);
+        u8g2.drawStr(28, 63, "Enter:Exit");
+        break;
+    }
+
+    }  // switch
+}
+
+// --------------------------------------------------------------------------
+// SD PIN TEST SUBMENU
+// --------------------------------------------------------------------------
+
+void SettingsApp::runSdPinDiagnostic() {
+    sdTestLineCount = 0;
+    auto addLine = [&](const char* fmt, ...) {
+        if (sdTestLineCount >= SD_TEST_LINES) return;
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(sdTestResults[sdTestLineCount], sizeof(sdTestResults[0]), fmt, args);
+        va_end(args);
+        Serial.printf("[SD_DIAG] %s\n", sdTestResults[sdTestLineCount]);
+        sdTestLineCount++;
+    };
+
+    addLine("Pin test: MOSI=%d SCK=%d", PIN_SPI_MOSI, PIN_SPI_SCLK);
+    addLine("  MISO=%d CS=%d", PIN_SPI_MISO, PIN_SD_CS);
+
+    // --- Step 1: GPIO loopback test (MOSI/MISO/SCK/CS as plain GPIO) ---
+    // First, release SPI bus and LCD pins
+    u8g2.begin();  // Will be re-inited after test
+
+    // Test CS pin — should be writable and readable
+    pinMode(PIN_SD_CS, OUTPUT);
+    digitalWrite(PIN_SD_CS, HIGH);
+    bool csHigh = digitalRead(PIN_SD_CS) == HIGH;
+    digitalWrite(PIN_SD_CS, LOW);
+    bool csLow = digitalRead(PIN_SD_CS) == LOW;
+    addLine("CS(39): H=%d L=%d %s", csHigh, csLow,
+            (csHigh && csLow) ? "OK" : "FAIL");
+
+    // Test MISO pin — should be pullable HIGH/LOW when no card
+    // With card inserted but no SPI, MISO should be floating/high-Z
+    pinMode(PIN_SPI_MISO, INPUT_PULLUP);
+    delay(1);
+    bool misoPU = digitalRead(PIN_SPI_MISO);
+    pinMode(PIN_SPI_MISO, INPUT_PULLDOWN);
+    delay(1);
+    bool misoPD = digitalRead(PIN_SPI_MISO);
+    // If both follow pullup/down: no card or card not driving = expected
+    // If stuck HIGH: card may be driving MISO (powered)
+    // If stuck LOW: possible short to GND
+    const char* misoStatus;
+    if (misoPU && !misoPD) misoStatus = "Float OK";
+    else if (misoPU && misoPD) misoStatus = "STUCK HI";
+    else if (!misoPU && !misoPD) misoStatus = "STUCK LO";
+    else misoStatus = "Weak pull";
+    addLine("MISO(37): PU=%d PD=%d %s", misoPU, misoPD, misoStatus);
+
+    // Test SCK as output
+    pinMode(PIN_SPI_SCLK, OUTPUT);
+    digitalWrite(PIN_SPI_SCLK, HIGH);
+    bool sckH = digitalRead(PIN_SPI_SCLK);
+    digitalWrite(PIN_SPI_SCLK, LOW);
+    bool sckL = digitalRead(PIN_SPI_SCLK);
+    addLine("SCK(36): H=%d L=%d %s", sckH, !sckL,
+            (sckH && !sckL) ? "OK" : "FAIL");
+
+    // Test MOSI as output
+    pinMode(PIN_SPI_MOSI, OUTPUT);
+    digitalWrite(PIN_SPI_MOSI, HIGH);
+    bool mosiH = digitalRead(PIN_SPI_MOSI);
+    digitalWrite(PIN_SPI_MOSI, LOW);
+    bool mosiL = digitalRead(PIN_SPI_MOSI);
+    addLine("MOSI(35): H=%d L=%d %s", mosiH, !mosiL,
+            (mosiH && !mosiL) ? "OK" : "FAIL");
+
+    // --- Step 2: Try SD CMD0 (GO_IDLE_STATE) via manual bit-bang ---
+    // Send 74+ clock pulses with CS HIGH (SD card init requirement)
+    pinMode(PIN_SD_CS, OUTPUT);
+    digitalWrite(PIN_SD_CS, HIGH);
+    pinMode(PIN_SPI_MOSI, OUTPUT);
+    digitalWrite(PIN_SPI_MOSI, HIGH);
+    pinMode(PIN_SPI_SCLK, OUTPUT);
+
+    for (int i = 0; i < 80; i++) {
+        digitalWrite(PIN_SPI_SCLK, HIGH);
+        delayMicroseconds(5);
+        digitalWrite(PIN_SPI_SCLK, LOW);
+        delayMicroseconds(5);
+    }
+
+    // Select card
+    digitalWrite(PIN_SD_CS, LOW);
+    delayMicroseconds(10);
+
+    // Send CMD0: 0x40 0x00 0x00 0x00 0x00 0x95
+    uint8_t cmd0[] = {0x40, 0x00, 0x00, 0x00, 0x00, 0x95};
+    pinMode(PIN_SPI_MISO, INPUT_PULLUP);
+
+    for (int b = 0; b < 6; b++) {
+        uint8_t byte = cmd0[b];
+        for (int bit = 7; bit >= 0; bit--) {
+            digitalWrite(PIN_SPI_MOSI, (byte >> bit) & 1);
+            delayMicroseconds(3);
+            digitalWrite(PIN_SPI_SCLK, HIGH);
+            delayMicroseconds(3);
+            digitalWrite(PIN_SPI_SCLK, LOW);
+        }
+    }
+
+    // Read response — wait up to 16 bytes for non-0xFF
+    uint8_t resp = 0xFF;
+    for (int attempt = 0; attempt < 16; attempt++) {
+        uint8_t rxByte = 0;
+        for (int bit = 7; bit >= 0; bit--) {
+            digitalWrite(PIN_SPI_SCLK, HIGH);
+            delayMicroseconds(3);
+            if (digitalRead(PIN_SPI_MISO)) rxByte |= (1 << bit);
+            digitalWrite(PIN_SPI_SCLK, LOW);
+            delayMicroseconds(3);
+        }
+        if (rxByte != 0xFF) {
+            resp = rxByte;
+            break;
+        }
+    }
+
+    digitalWrite(PIN_SD_CS, HIGH);
+
+    if (resp == 0x01) {
+        addLine("CMD0: 0x%02X CARD OK", resp);
+    } else if (resp == 0xFF) {
+        addLine("CMD0: 0xFF NO CARD");
+    } else {
+        addLine("CMD0: 0x%02X (unexpected)", resp);
+    }
+
+    // --- Step 3: Try SdFat mount ---
+    bool sdOk = mountSD();
+    addLine("SdFat mount: %s", sdOk ? "OK" : "FAIL");
+
+    // Restore LCD (mountSD already calls sdEndSession)
+    // Re-init display after pin tests
+    u8g2.begin();
+    u8g2.setContrast(systemContrast);
+    u8g2.setFontMode(1);
+    u8g2.setBitmapMode(1);
+
+    sdTestRan = true;
+}
+
+void SettingsApp::renderSdTest() {
+    if (!sdTestRan) {
+        runSdPinDiagnostic();
+    }
+
+    GUI::drawHeader("SD PIN TEST");
+    u8g2.setFont(u8g2_font_4x6_tf);
+
+    int y = GUI::HEADER_HEIGHT + 8;
+    for (int i = 0; i < sdTestLineCount && y < 58; i++) {
+        u8g2.drawStr(1, y, sdTestResults[i]);
+        y += 7;
+    }
+
+    u8g2.setFont(u8g2_font_5x7_tf);
+    u8g2.drawStr(1, 63, "Esc:Back  >:Retest");
 }
 
 // --------------------------------------------------------------------------

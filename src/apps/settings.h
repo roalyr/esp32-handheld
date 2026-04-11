@@ -18,6 +18,8 @@ class SettingsApp : public App {
         SETTING_SLEEP,
         SETTING_KEY_TESTER,
         SETTING_T9_EDITOR,
+        SETTING_LCD_TEST,
+        SETTING_SD_TEST,
         SETTING_COUNT
     };
     
@@ -25,6 +27,10 @@ class SettingsApp : public App {
     bool editMode;
     bool inKeyTester;
     bool inT9Editor;
+    bool inLcdTest;
+    int lcdTestStep;       // Current test pattern (0-based)
+    bool inSdTest;
+    bool sdTestRan;        // True after test has executed
     
     // Editable values
     int tempBrightness;
@@ -66,6 +72,9 @@ class SettingsApp : public App {
     void renderKeyTester();
     void renderT9Editor();
     void renderInfoHeader();
+    void renderLcdTest();
+    void renderSdTest();
+    void runSdPinDiagnostic();
 
   public:
     SettingsApp();
@@ -75,6 +84,12 @@ class SettingsApp : public App {
     void render() override;
     void handleInput(char key) override;
     bool isInSubmenu();
+    static const int LCD_TEST_COUNT = 7;
+    
+    // SD test result lines (filled by runSdPinDiagnostic)
+    static const int SD_TEST_LINES = 8;
+    char sdTestResults[SD_TEST_LINES][26];  // 25 chars + null per line
+    int sdTestLineCount;
 };
 
 #endif

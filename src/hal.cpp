@@ -44,19 +44,19 @@ byte rowPins[ROWS] = {3, 7, 5, 9};
 byte colPins[COLS] = {1, 2, 4, 6, 8}; 
 
 char keyMap[ROWS][COLS] = {
-  {KEY_ESC,  '1',      '2',      '3',       KEY_BKSP },
+  {KEY_ALT,  KEY_LEFT, '0',      KEY_RIGHT, KEY_DOWN },
   {KEY_TAB,  '4',      '5',      '6',       KEY_ENTER},
   {KEY_SHIFT,'7',      '8',      '9',       KEY_UP   },
-  {KEY_ALT,  KEY_LEFT, '0',      KEY_RIGHT, KEY_DOWN }
+  {KEY_ESC,  '1',      '2',      '3',       KEY_BKSP }
 };
 
 // Repeatable key flags - mirrors keyMap layout
 // true = key will auto-repeat when held (non-T9 keys only)
 bool keyRepeatMap[ROWS][COLS] = {
-  {false, false, false, false, true },  // ESC, 1, 2, 3, BKSP
+  {false, true,  true,  true,  true },  // ALT, LEFT, 0, RIGHT, DOWN
   {false, false, false, false, true },  // TAB, 4, 5, 6, ENTER
   {false, false, false, false, true },  // SHIFT, 7, 8, 9, UP
-  {false, true,  true,  true,  true }   // ALT, LEFT, 0, RIGHT, DOWN
+  {false, false, false, false, true }   // ESC, 1, 2, 3, BKSP
 };
 
 char activeKeys[MAX_PRESSED_KEYS];

@@ -242,8 +242,8 @@ void SettingsApp::renderSettingsList() {
     if (selectedIndex >= maxVisible) {
         scrollOff = selectedIndex - maxVisible + 1;
     }
-    // Clamp so we can always see totalItems
-    if (scrollOff > totalItems - maxVisible) {
+    // When at last selectable item, scroll one more to show info line
+    if (selectedIndex == SETTING_COUNT - 1 && scrollOff < totalItems - maxVisible) {
         scrollOff = totalItems - maxVisible;
     }
     if (scrollOff < 0) scrollOff = 0;
@@ -259,8 +259,8 @@ void SettingsApp::renderSettingsList() {
             int freeRamK = ESP.getFreeHeap() / 1024;
             if (isSDMounted()) {
                 uint64_t totalMB = sdTotalBytes() / (1024*1024);
-                uint64_t usedMB = sdUsedBytes() / (1024*1024);
-                snprintf(buf, sizeof(buf), "RAM %dk SD %llu/%lluM", freeRamK, (unsigned long long)usedMB, (unsigned long long)totalMB);
+                uint64_t freeMB = (sdTotalBytes() - sdUsedBytes()) / (1024*1024);
+                snprintf(buf, sizeof(buf), "RAM %dk SD %lluM free", freeRamK, (unsigned long long)freeMB);
             } else {
                 snprintf(buf, sizeof(buf), "RAM %dk SD:none", freeRamK);
             }
@@ -311,14 +311,16 @@ void SettingsApp::renderSettingsList() {
         if (highlightSel) u8g2.setDrawColor(1);
     }
     
-    // Scroll indicators
+    // Scroll indicators (small triangles)
     if (scrollOff > 0) {
-        u8g2.setFont(u8g2_font_4x6_tf);
-        u8g2.drawStr(120, GUI::CONTENT_START_Y - 2, "^");
+        int cx = 124;
+        int ty = GUI::CONTENT_START_Y - 9;
+        u8g2.drawTriangle(cx - 2, ty + 3, cx + 2, ty + 3, cx, ty);
     }
     if (scrollOff + maxVisible < totalItems) {
-        u8g2.setFont(u8g2_font_4x6_tf);
-        u8g2.drawStr(120, GUI::CONTENT_START_Y + maxVisible * GUI::LINE_HEIGHT - 4, "v");
+        int cx = 124;
+        int by = GUI::CONTENT_START_Y + (maxVisible - 1) * GUI::LINE_HEIGHT + 2;
+        u8g2.drawTriangle(cx - 2, by, cx + 2, by, cx, by + 3);
     }
 }
 

@@ -15,7 +15,7 @@
 // VERSION INFO
 // --------------------------------------------------------------------------
 
-#define FIRMWARE_VERSION "1.1.1"
+#define FIRMWARE_VERSION "1.2"
 #define FIRMWARE_NAME "ESP32 Handheld"
 
 // --------------------------------------------------------------------------
@@ -30,8 +30,8 @@
 // Display (ST7920 128x64, SW SPI on dedicated pins) — per TRUTH_HARDWARE.md Section 1
 #define PIN_LCD_SID   33   // GPIO 33 — LCD serial data (MOSI), dedicated
 #define PIN_LCD_E     34   // GPIO 34 — LCD serial clock (SCK), dedicated
-#define PIN_CS        38   // LCD pin 4 (RS) — Chip Select
-#define PIN_BACKLIGHT 40   // LCD pin 19 (BLA) — PWM backlight anode
+#define PIN_CS        18   // LCD pin 4 (RS) — Chip Select
+#define PIN_BACKLIGHT 21   // LCD pin 19 (BLA) — PWM backlight anode
 // Note: PIN_DC removed (ST7920 SPI has no DC line)
 // Note: PIN_RST removed (RST tied to 3V3 in hardware)
 

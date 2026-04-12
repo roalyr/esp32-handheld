@@ -171,7 +171,7 @@
       11. T9 Editor: ALT cycles T9→ABC→123
       12. Arrow keys + BKSP + ENTER repeat when held
 
-  - [ ] TASK_6: Update `src/apps/settings.cpp` — show SD card mount status and space info
+  - [x] TASK_6: Update `src/apps/settings.cpp` — show SD card mount status and space info
     - In `renderSettingsList()`, modify the system info line (currently "RAM XXk") to include SD status:
       ```cpp
       int freeRamK = ESP.getFreeHeap() / 1024;

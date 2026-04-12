@@ -13,12 +13,12 @@
 | **GND**               | 1 (GND)            | Ground           | Common Ground                     |
 | **VBUS (5V)**         | 2 (VCC)            | Logic Supply     | Use 5V (ST7920 standard)          |
 | —                     | 3 (V0)             | Contrast         | Connect to 10k Pot wiper (or GND) |
-| **GPIO 38**           | 4 (RS)             | **CS**           | Chip Select                       |
+| **GPIO 18**           | 4 (RS)             | **CS**           | Chip Select                       |
 | **GPIO 33**           | 5 (R/W)            | **SID**          | MOSI (Serial Data), dedicated     |
 | **GPIO 34**           | 6 (E)              | **SCLK**         | SCK (Serial Clock), dedicated     |
 | **GND**               | 15 (PSB)           | Interface Select | **Tie to GND** for SPI mode       |
 | **3V3** or GPIO       | 17 (RST)           | Reset            | Pull High to 3.3V to run          |
-| **GPIO 40**           | 19 (BLA)           | Backlight +      | PWM Anode                         |
+| **GPIO 21**           | 19 (BLA)           | Backlight +      | PWM Anode                         |
 | **GND**               | 20 (BLK)           | Backlight -      | Cathode                           |
 
 2. Keyboard: 4 rows by 5 columns matrix.
@@ -44,4 +44,4 @@
 
 4. Buzzers (Not yet wired).
 
-5. Free pins (so far): 11, 12; 10, 13, 14; 15; 16, 17, 18, 21
+5. Free pins (so far): 11, 12; 10, 13, 14; 15; 16, 17; 38, 40

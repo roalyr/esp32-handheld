@@ -22,12 +22,14 @@
 // HARDWARE PINS (ESP32-S2-Mini) — per TRUTH_HARDWARE.md
 // --------------------------------------------------------------------------
 
-// SPI bus (shared by LCD and SD card) — per TRUTH_HARDWARE.md Section 0.1
-#define PIN_SPI_MOSI  35   // GPIO 35 — MOSI (LCD SID + SD MOSI)
-#define PIN_SPI_MISO  37   // GPIO 37 — MISO (SD card only, LCD doesn't use)
-#define PIN_SPI_SCLK  36   // GPIO 36 — SCK  (LCD E + SD SCK)
+// SD card SPI bus (HW SPI / FSPI, dedicated) — per TRUTH_HARDWARE.md Section 0.1
+#define PIN_SPI_MOSI  35   // GPIO 35 — SD MOSI
+#define PIN_SPI_MISO  37   // GPIO 37 — SD MISO
+#define PIN_SPI_SCLK  36   // GPIO 36 — SD SCK
 
-// Display (ST7920 128x64, SW SPI) — per TRUTH_HARDWARE.md Section 1
+// Display (ST7920 128x64, SW SPI on dedicated pins) — per TRUTH_HARDWARE.md Section 1
+#define PIN_LCD_SID   33   // GPIO 33 — LCD serial data (MOSI), dedicated
+#define PIN_LCD_E     34   // GPIO 34 — LCD serial clock (SCK), dedicated
 #define PIN_CS        38   // LCD pin 4 (RS) — Chip Select
 #define PIN_BACKLIGHT 40   // LCD pin 19 (BLA) — PWM backlight anode
 // Note: PIN_DC removed (ST7920 SPI has no DC line)

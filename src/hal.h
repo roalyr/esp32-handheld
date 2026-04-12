@@ -28,11 +28,11 @@ extern int systemBrightness;  // Global backlight brightness (0-255)
 // SD CARD EXPORTS
 // --------------------------------------------------------------------------
 
-// Session-based SD access: LCD uses SW_SPI (GPIO bit-bang), SD needs HW SPI.
-// sdBeginSession/sdEndSession acquire/release the shared SPI bus.
+// SD card uses HW SPI (FSPI) on dedicated pins GPIO 35/36/37.
+// LCD is on separate GPIO 33/34 — no bus conflict.
 // Uses SdFat library (Arduino SD library's ESP-IDF driver fails on S2).
-bool sdBeginSession();    // Acquire HW SPI bus + mount SD. LCD won't work until end.
-void sdEndSession();      // Release HW SPI bus. LCD resumes.
+bool sdBeginSession();    // Acquire HW SPI + mount SD.
+void sdEndSession();      // Release HW SPI bus.
 
 // Public API (cached values — no SPI bus needed)
 bool mountSD();           // Full cycle: acquire, cache info, release. Returns success.

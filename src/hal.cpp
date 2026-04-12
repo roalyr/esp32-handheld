@@ -12,9 +12,10 @@
 // DISPLAY OBJECTS
 // --------------------------------------------------------------------------
 
-// SW_SPI — bit-bangs GPIO pins directly, no SPI peripheral involvement.
+// SW_SPI — bit-bangs dedicated LCD GPIO pins, no SPI peripheral involvement.
 // HW_SPI causes display artifacts on ST7920 (non-standard serial protocol).
-U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R0, PIN_SPI_SCLK, PIN_SPI_MOSI, PIN_CS);
+// LCD uses dedicated GPIO 33 (SID) and GPIO 34 (E), isolated from SD SPI bus.
+U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R0, PIN_LCD_E, PIN_LCD_SID, PIN_CS);
 const uint8_t* FONT_SMALL = u8g2_font_5x7_t_cyrillic;
 
 // Global Settings
@@ -25,9 +26,8 @@ int systemBrightness = 38;  // Default ~15% brightness (0-255)
 // SD CARD STATE
 // --------------------------------------------------------------------------
 
-// Session-based SD access: LCD uses SW_SPI (GPIO bit-bang), SD needs HW SPI.
-// Since they share MOSI/SCK pins, SD operations must temporarily acquire the
-// HW SPI bus, then release it so LCD bit-bang can resume.
+// SD card uses HW SPI (FSPI) on dedicated pins GPIO 35/36/37.
+// LCD is on separate GPIO 33/34 — no bus contention.
 // Uses SdFat library — Arduino SD library's ESP-IDF SDSPI driver fails on S2.
 SdFat sdFat;
 static SPIClass sdSpi(FSPI);
@@ -100,12 +100,22 @@ void setupHardware() {
   ledcAttachPin(PIN_BACKLIGHT, 0);
   ledcWrite(0, systemBrightness);
 
-  // No SD probe here — done later in main.cpp setup() where serial is reliable
+  // Init LCD first — uses dedicated pins (GPIO 33/34), no bus conflict with SD
   u8g2.begin();
   u8g2.setContrast(systemContrast); // No-op on ST7920 (contrast via hardware pot)
   u8g2.setFontMode(1);
   u8g2.setBitmapMode(1);
   u8g2.enableUTF8Print();
+
+  // Probe SD card on HW SPI (FSPI) — dedicated pins, no LCD interference
+  Serial.println("[HAL] Probing SD card...");
+  if (mountSD()) {
+      Serial.printf("[HAL] SD card: detected (%llu/%llu bytes used)\n",
+                    (unsigned long long)sdUsedBytes(),
+                    (unsigned long long)sdTotalBytes());
+  } else {
+      Serial.println("[HAL] SD card: not found");
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -113,43 +123,36 @@ void setupHardware() {
 // --------------------------------------------------------------------------
 
 // Acquire HW SPI bus and mount SD card for file operations.
-// LCD SW_SPI will NOT work while session is active (shared pins).
-// Returns true if SD card is accessible.
+// LCD is on separate pins — no conflict.
 bool sdBeginSession() {
-    if (sdSessionActive) return true;  // Already held
+    if (sdSessionActive) return true;
 
-    // Deselect LCD before SPI bus activity (shared MOSI/SCK pins)
-    pinMode(PIN_CS, OUTPUT);
-    digitalWrite(PIN_CS, HIGH);
+    pinMode(PIN_SD_CS, OUTPUT);
+    digitalWrite(PIN_SD_CS, HIGH);
 
-    sdSpi.begin(PIN_SPI_SCLK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_SD_CS);
-
-    SdSpiConfig spiCfg(PIN_SD_CS, SHARED_SPI, SD_SCK_MHZ(4), &sdSpi);
+    sdSpi.begin(PIN_SPI_SCLK, PIN_SPI_MISO, PIN_SPI_MOSI);
+    SdSpiConfig spiCfg(PIN_SD_CS, DEDICATED_SPI, SD_SCK_MHZ(4), &sdSpi);
     if (sdFat.begin(spiCfg)) {
         sdSessionActive = true;
+        Serial.println("[HAL] SdFat OK (HW SPI, 4MHz)");
         return true;
     }
-    Serial.println("[HAL] SdFat.begin() failed");
-    // Mount failed — clean up
+    Serial.printf("[HAL] SdFat fail type=%d code=0x%02X\n",
+                   (int)sdFat.sdErrorCode(),
+                   (int)sdFat.sdErrorData());
     sdSpi.end();
-    // Restore MOSI/SCK to GPIO output mode for LCD bit-bang
-    pinMode(PIN_SPI_SCLK, OUTPUT);
-    pinMode(PIN_SPI_MOSI, OUTPUT);
     sdCardDetected = false;
     sdCachedTotal = 0;
     sdCachedUsed = 0;
     return false;
 }
 
-// Release HW SPI bus and restore pins to GPIO mode for LCD SW_SPI.
+// Release HW SPI bus.
 void sdEndSession() {
     if (!sdSessionActive) return;
     sdFat.end();
     sdSpi.end();
     sdSessionActive = false;
-    // Restore MOSI/SCK to GPIO output mode for LCD bit-bang
-    pinMode(PIN_SPI_SCLK, OUTPUT);
-    pinMode(PIN_SPI_MOSI, OUTPUT);
 }
 
 // --------------------------------------------------------------------------

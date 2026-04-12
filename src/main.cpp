@@ -198,9 +198,9 @@ void setup() {
         }
     }
     
-    // SD probe here (after Lua init) so serial output is reliably visible
-    Serial.println("[main] Probing SD card...");
-    if (mountSD()) {
+    // SD was already probed in setupHardware() (before LCD init).
+    // Log the cached result here for visibility in the boot sequence.
+    if (isSDMounted()) {
         Serial.printf("[main] SD card: detected (%llu/%llu bytes used)\n",
                       (unsigned long long)sdUsedBytes(),
                       (unsigned long long)sdTotalBytes());

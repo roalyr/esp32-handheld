@@ -510,11 +510,8 @@ void SettingsApp::runSdPinDiagnostic() {
     addLine("Pin test: MOSI=%d SCK=%d", PIN_SPI_MOSI, PIN_SPI_SCLK);
     addLine("  MISO=%d CS=%d", PIN_SPI_MISO, PIN_SD_CS);
 
-    // --- Step 1: GPIO loopback test (MOSI/MISO/SCK/CS as plain GPIO) ---
-    // First, release SPI bus and LCD pins
-    u8g2.begin();  // Will be re-inited after test
-
-    // Test CS pin — should be writable and readable
+    // --- Step 1: Test GPIO pins ---
+    // Test SD CS pin
     pinMode(PIN_SD_CS, OUTPUT);
     digitalWrite(PIN_SD_CS, HIGH);
     bool csHigh = digitalRead(PIN_SD_CS) == HIGH;
@@ -569,9 +566,9 @@ void SettingsApp::runSdPinDiagnostic() {
 
     for (int i = 0; i < 80; i++) {
         digitalWrite(PIN_SPI_SCLK, HIGH);
-        delayMicroseconds(5);
+        delayMicroseconds(10);
         digitalWrite(PIN_SPI_SCLK, LOW);
-        delayMicroseconds(5);
+        delayMicroseconds(10);
     }
 
     // Select card
@@ -586,9 +583,9 @@ void SettingsApp::runSdPinDiagnostic() {
         uint8_t byte = cmd0[b];
         for (int bit = 7; bit >= 0; bit--) {
             digitalWrite(PIN_SPI_MOSI, (byte >> bit) & 1);
-            delayMicroseconds(3);
+            delayMicroseconds(10);
             digitalWrite(PIN_SPI_SCLK, HIGH);
-            delayMicroseconds(3);
+            delayMicroseconds(10);
             digitalWrite(PIN_SPI_SCLK, LOW);
         }
     }
@@ -599,10 +596,10 @@ void SettingsApp::runSdPinDiagnostic() {
         uint8_t rxByte = 0;
         for (int bit = 7; bit >= 0; bit--) {
             digitalWrite(PIN_SPI_SCLK, HIGH);
-            delayMicroseconds(3);
+            delayMicroseconds(10);
             if (digitalRead(PIN_SPI_MISO)) rxByte |= (1 << bit);
             digitalWrite(PIN_SPI_SCLK, LOW);
-            delayMicroseconds(3);
+            delayMicroseconds(10);
         }
         if (rxByte != 0xFF) {
             resp = rxByte;
@@ -620,16 +617,105 @@ void SettingsApp::runSdPinDiagnostic() {
         addLine("CMD0: 0x%02X (unexpected)", resp);
     }
 
+    // --- Step 2b: bit-bang helper lambdas ---
+    auto bbSendByte = [](uint8_t b) {
+        for (int bit = 7; bit >= 0; bit--) {
+            digitalWrite(PIN_SPI_MOSI, (b >> bit) & 1);
+            delayMicroseconds(10);
+            digitalWrite(PIN_SPI_SCLK, HIGH);
+            delayMicroseconds(20);
+            digitalWrite(PIN_SPI_SCLK, LOW);
+            delayMicroseconds(10);
+        }
+    };
+    auto bbRecvByte = []() -> uint8_t {
+        digitalWrite(PIN_SPI_MOSI, HIGH);  // SD spec: DI HIGH while receiving
+        uint8_t d = 0;
+        for (int bit = 7; bit >= 0; bit--) {
+            digitalWrite(PIN_SPI_SCLK, HIGH);
+            delayMicroseconds(20);
+            if (digitalRead(PIN_SPI_MISO)) d |= (1 << bit);
+            digitalWrite(PIN_SPI_SCLK, LOW);
+            delayMicroseconds(20);
+        }
+        return d;
+    };
+    auto bbWaitR1 = [&bbRecvByte]() -> uint8_t {
+        for (int i = 0; i < 16; i++) {
+            uint8_t r = bbRecvByte();
+            if (r != 0xFF) return r;
+        }
+        return 0xFF;
+    };
+    auto bbSendCmd = [&bbSendByte](const uint8_t* cmd) {
+        for (int i = 0; i < 6; i++) bbSendByte(cmd[i]);
+    };
+    // Dummy clocks between commands — MOSI HIGH, CS can be either state
+    auto bbDummyClocks = [](int count) {
+        digitalWrite(PIN_SPI_MOSI, HIGH);
+        for (int i = 0; i < count; i++) {
+            digitalWrite(PIN_SPI_SCLK, HIGH);
+            delayMicroseconds(20);
+            digitalWrite(PIN_SPI_SCLK, LOW);
+            delayMicroseconds(20);
+        }
+    };
+
+    // --- Step 2c: CMD8 (SEND_IF_COND) — the command SdFat fails on ---
+    if (resp == 0x01) {
+        // Dummy clocks with CS HIGH, MOSI HIGH — let card process CMD0
+        digitalWrite(PIN_SD_CS, HIGH);
+        bbDummyClocks(80);
+        digitalWrite(PIN_SD_CS, LOW);
+        delayMicroseconds(50);
+
+        // CMD8: 0x48 0x00 0x00 0x01 0xAA 0x87
+        uint8_t cmd8[] = {0x48, 0x00, 0x00, 0x01, 0xAA, 0x87};
+        bbSendCmd(cmd8);
+        uint8_t r1 = bbWaitR1();
+        // R7 response: R1 + 4 bytes
+        uint8_t r7[4] = {0};
+        if (r1 != 0xFF) {
+            for (int i = 0; i < 4; i++) r7[i] = bbRecvByte();
+        }
+        addLine("CMD8: R1=0x%02X", r1);
+        addLine(" R7=%02X%02X%02X%02X", r7[0], r7[1], r7[2], r7[3]);
+        // Expected: R1=0x01, R7=000001AA
+
+        // --- Step 2d: CMD55+ACMD41 (init card) ---
+        if (r1 == 0x01) {
+            uint8_t acmdR1 = 0xFF;
+            for (int a = 0; a < 50; a++) {
+                digitalWrite(PIN_SD_CS, HIGH);
+                bbDummyClocks(16);
+                digitalWrite(PIN_SD_CS, LOW);
+                delayMicroseconds(50);
+
+                // CMD55: 0x77 0x00 0x00 0x00 0x00 0x65
+                uint8_t cmd55[] = {0x77, 0x00, 0x00, 0x00, 0x00, 0x65};
+                bbSendCmd(cmd55);
+                bbWaitR1();
+
+                digitalWrite(PIN_SD_CS, HIGH);
+                bbDummyClocks(16);
+                digitalWrite(PIN_SD_CS, LOW);
+                delayMicroseconds(50);
+
+                // ACMD41: 0x69 0x40 0x00 0x00 0x00 0x77
+                uint8_t acmd41[] = {0x69, 0x40, 0x00, 0x00, 0x00, 0x77};
+                bbSendCmd(acmd41);
+                acmdR1 = bbWaitR1();
+                if (acmdR1 == 0x00) break;
+                delay(10);
+            }
+            addLine("ACMD41: 0x%02X %s", acmdR1,
+                    acmdR1 == 0x00 ? "READY" : "FAIL");
+        }
+    }
+
     // --- Step 3: Try SdFat mount ---
     bool sdOk = mountSD();
     addLine("SdFat mount: %s", sdOk ? "OK" : "FAIL");
-
-    // Restore LCD (mountSD already calls sdEndSession)
-    // Re-init display after pin tests
-    u8g2.begin();
-    u8g2.setContrast(systemContrast);
-    u8g2.setFontMode(1);
-    u8g2.setBitmapMode(1);
 
     sdTestRan = true;
 }

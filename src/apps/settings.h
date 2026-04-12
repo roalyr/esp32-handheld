@@ -87,7 +87,7 @@ class SettingsApp : public App {
     static const int LCD_TEST_COUNT = 7;
     
     // SD test result lines (filled by runSdPinDiagnostic)
-    static const int SD_TEST_LINES = 8;
+    static const int SD_TEST_LINES = 12;
     char sdTestResults[SD_TEST_LINES][26];  // 25 chars + null per line
     int sdTestLineCount;
 };

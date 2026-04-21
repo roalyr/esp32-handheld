@@ -223,6 +223,7 @@
 
 ---
 **STATUS:** PENDING
+**VERIFICATOR_NOTE (2026-04-22):** User-authorized out-of-scope retention: Settings contrast control was reintroduced (`SETTING_CONTRAST`) and kept by request. No contract task checkboxes were changed in this pass.
 **PRIORITY:** CRITICAL — Adds external storage and first user-launchable Lua app via desktop registry
 **PREVIOUS_MILESTONE:** Two-State Architecture — Cooperative Lua Runtime (COMPLETED — all 7 tasks verified per SESSION_LOG 2026-03-28)
 **KEY_RISK:** HW_SPI switch for ST7920 LCD — display may require tuning (SPI clock speed, mode). If HW_SPI fails on hardware, fallback: manage SPI peripheral dynamically (`SPI.begin()`/`SPI.end()` around SD operations, keep SW_SPI for LCD between SD accesses).

@@ -95,7 +95,7 @@ enum AppId {
 
 #define MULTITAP_TIMEOUT 800   
 #define CURSOR_BLINK_RATE 500
-#define DEFAULT_CONTRAST 0     // Global default contrast (0-255)
+#define DEFAULT_CONTRAST 200   // Global default contrast (0-255). ST7920 Vop register via U8G2 extended instructions.
 
 // Key repeat settings (for non-T9 keys like arrows/nav)
 #define KEY_REPEAT_DELAY_MS  200   // Initial delay before repeat starts

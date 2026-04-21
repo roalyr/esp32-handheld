@@ -51,6 +51,7 @@ SettingsApp::SettingsApp() {
     inKeyTester = false;
     inT9Editor = false;
     tempBrightness = systemBrightness;
+    tempContrast = systemContrast;
     tempSleepEnabled = SLEEP_ENABLED;
     lastPressedKey = ' ';
     for (int i = 0; i < HISTORY_SIZE; i++) keyHistory[i] = ' ';
@@ -65,6 +66,7 @@ SettingsApp::SettingsApp() {
 
 void SettingsApp::start() {
     tempBrightness = systemBrightness;
+    tempContrast = systemContrast;
     tempSleepEnabled = sleepEnabled;
     editMode = false;
     inKeyTester = false;
@@ -78,6 +80,7 @@ void SettingsApp::start() {
 
 void SettingsApp::stop() {
     systemBrightness = tempBrightness;
+    systemContrast = tempContrast;
     sleepEnabled = tempSleepEnabled;
     inKeyTester = false;
     inT9Editor = false;
@@ -192,6 +195,10 @@ void SettingsApp::handleInput(char key) {
                 systemBrightness = tempBrightness;
                 ledcWrite(0, systemBrightness);
             }
+            if (selectedIndex == SETTING_CONTRAST) {
+                systemContrast = tempContrast;
+                u8g2.setContrast(systemContrast);
+            }
             if (selectedIndex == SETTING_SLEEP) {
                 sleepEnabled = tempSleepEnabled;
             }
@@ -207,6 +214,19 @@ void SettingsApp::handleInput(char key) {
                 tempBrightness -= 15;
                 if (tempBrightness < 10) tempBrightness = 10;
                 ledcWrite(0, tempBrightness);
+            }
+        }
+
+        if (selectedIndex == SETTING_CONTRAST) {
+            if (key == KEY_RIGHT) {
+                tempContrast += 5;
+                if (tempContrast > 255) tempContrast = 255;
+                u8g2.setContrast(tempContrast);
+            }
+            if (key == KEY_LEFT) {
+                tempContrast -= 5;
+                if (tempContrast < 0) tempContrast = 0;
+                u8g2.setContrast(tempContrast);
             }
         }
         
@@ -285,6 +305,12 @@ void SettingsApp::renderSettingsList() {
                 snprintf(buf, sizeof(buf), "Backlight: %d%%", pct);
             break;
         }
+        case SETTING_CONTRAST:
+            if (editMode && isSelected)
+                snprintf(buf, sizeof(buf), "Contrast: <%d>", tempContrast);
+            else
+                snprintf(buf, sizeof(buf), "Contrast: %d", tempContrast);
+            break;
         case SETTING_SLEEP:
             if (editMode && isSelected)
                 snprintf(buf, sizeof(buf), "Sleep: <%s>", tempSleepEnabled ? "ON" : "OFF");

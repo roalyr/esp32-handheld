@@ -102,7 +102,7 @@ void setupHardware() {
 
   // Init LCD first — uses dedicated pins (GPIO 33/34), no bus conflict with SD
   u8g2.begin();
-  u8g2.setContrast(systemContrast); // No-op on ST7920 (contrast via hardware pot)
+  u8g2.setContrast(systemContrast); // Sets Vop via ST7920 extended instruction set (RE=1 mode). Works independently of hardware V0 pot.
   u8g2.setFontMode(1);
   u8g2.setBitmapMode(1);
   u8g2.enableUTF8Print();

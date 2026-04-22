@@ -1,8 +1,8 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/apps/settings.h
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TACTICAL_TODO TASKs 5, 7, 12
-// LOG_REF: 2026-04-02
+// TRUTH_LINK: TACTICAL_TODO TASK_1
+// LOG_REF: 2026-04-22
 // Description: Settings app with brightness, sleep, key tester, T9 editor.
 
 #ifndef APP_SETTINGS_H
@@ -13,6 +13,8 @@
 
 class SettingsApp : public App {
   private:
+    enum T9ViewMode { VIEW_FULL, VIEW_FULL_LINENO, VIEW_MIN_LINENO, VIEW_MIN };
+
     enum SettingItem {
         SETTING_BRIGHTNESS = 0,
         SETTING_CONTRAST,
@@ -56,6 +58,11 @@ class SettingsApp : public App {
     unsigned long t9TapTime;   // Last tap timestamp
     int t9ScrollOffset;        // Vertical scroll offset for text area
     unsigned long t9CursorMoveTime; // Last cursor move timestamp (suppresses blink)
+    T9ViewMode t9ViewMode;
+    bool t9SavePromptActive;
+    int t9SavePromptSelection;  // 0=No, 1=Yes
+    int t9SingleKeyCycleIndex;  // single-digit T9 cycle: letters first, then dictionary
+    bool t9ZeroPending;         // pending T9-mode 0 press: tap=space on release, hold=literal 0
 
     // T9 fallback-ABC mode: when prediction fails mid-word,
     // commit the known part and continue in ABC for the rest.
@@ -68,6 +75,8 @@ class SettingsApp : public App {
     void t9CommitMultiTap();    // Confirm multi-tap char into text
     String t9GetMultiTapChar() const;
     void t9MoveCursorVertically(int dir); // Vertical cursor movement
+    void t9HandleSavePromptInput(char key);
+    void renderT9SavePrompt();
 
     // Sub-renderers
     void renderSettingsList();

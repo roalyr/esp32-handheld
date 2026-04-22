@@ -4,7 +4,7 @@
 - TECHNICAL_CONSTRAINTS:
   - TRUTH_PROJECT.md is not present in workspace; no additional constraints may be inferred beyond explicit Truth files.
 - ATOMIC_TASKS:
-  - [ ] TASK_1: Rework T9 editor input/prediction behavior and coding symbols without scope creep.
+  - [x] TASK_1: Rework T9 editor input/prediction behavior and coding symbols without scope creep.
     Required signatures:
     - src/apps/settings.h:
       - Add enum T9ViewMode { VIEW_FULL, VIEW_FULL_LINENO, VIEW_MIN_LINENO, VIEW_MIN };
@@ -33,7 +33,7 @@
       - .,?!1()[]{}<>:;"'`=+-*/%#_\\|&$
     - Bracket completion: committing left bracket from any input mode inserts matching pair and keeps cursor between, for (), [], {}, <>.
 
-  - [ ] TASK_2: Add authoring-assist content and safe-exit UX contract for T9 editor.
+  - [x] TASK_2: Add authoring-assist content and safe-exit UX contract for T9 editor.
     Required signatures:
     - src/apps/settings.cpp:
       - ESC while in T9 editor opens modal save prompt stub and blocks editor ESC handling until answered.

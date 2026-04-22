@@ -2,8 +2,8 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/t9_predict.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TACTICAL_TODO TASK_2
-// LOG_REF: 2026-04-01
+// TRUTH_LINK: TACTICAL_TODO TASK_1
+// LOG_REF: 2026-04-22
 // Description: T9 predictive text lookup — binary search on PROGMEM dictionary.
 //              Prefix matching scans sorted index for incremental suggestions.
 //
@@ -171,6 +171,121 @@ void T9Predict::prevPrefixCandidate() {
     }
 }
 
+int T9Predict::getPrefixCandidateCountForLength(int targetLen) const {
+    if (targetLen <= 0) return 0;
+    int count = 0;
+    for (int i = 0; i < prefixCandidateCount; i++) {
+        T9IndexEntry entry;
+        memcpy_P(&entry, &t9_index[prefixMatches[i].indexPos], sizeof(T9IndexEntry));
+        if (keyDigitCount(entry.key) == targetLen) count++;
+    }
+    return count;
+}
+
+const char* T9Predict::getPrefixCandidateForLength(int targetLen, int index) const {
+    if (targetLen <= 0 || index < 0) return nullptr;
+    int seen = 0;
+    for (int i = 0; i < prefixCandidateCount; i++) {
+        T9IndexEntry entry;
+        memcpy_P(&entry, &t9_index[prefixMatches[i].indexPos], sizeof(T9IndexEntry));
+        if (keyDigitCount(entry.key) != targetLen) continue;
+        if (seen == index) return getPrefixCandidate(i);
+        seen++;
+    }
+    return nullptr;
+}
+
+void T9Predict::nextPrefixCandidateForLength(int targetLen) {
+    if (targetLen <= 0 || prefixCandidateCount == 0) return;
+    int count = getPrefixCandidateCountForLength(targetLen);
+    if (count <= 0) return;
+
+    int filteredIdx = 0;
+    bool foundCurrent = false;
+    for (int i = 0; i < prefixCandidateCount; i++) {
+        T9IndexEntry entry;
+        memcpy_P(&entry, &t9_index[prefixMatches[i].indexPos], sizeof(T9IndexEntry));
+        if (keyDigitCount(entry.key) != targetLen) continue;
+        if (i == prefixSelectedIdx) {
+            foundCurrent = true;
+            break;
+        }
+        filteredIdx++;
+    }
+    if (!foundCurrent) filteredIdx = 0;
+    int nextFiltered = (filteredIdx + 1) % count;
+
+    int seen = 0;
+    for (int i = 0; i < prefixCandidateCount; i++) {
+        T9IndexEntry entry;
+        memcpy_P(&entry, &t9_index[prefixMatches[i].indexPos], sizeof(T9IndexEntry));
+        if (keyDigitCount(entry.key) != targetLen) continue;
+        if (seen == nextFiltered) {
+            prefixSelectedIdx = i;
+            return;
+        }
+        seen++;
+    }
+}
+
+void T9Predict::prevPrefixCandidateForLength(int targetLen) {
+    if (targetLen <= 0 || prefixCandidateCount == 0) return;
+    int count = getPrefixCandidateCountForLength(targetLen);
+    if (count <= 0) return;
+
+    int filteredIdx = 0;
+    bool foundCurrent = false;
+    for (int i = 0; i < prefixCandidateCount; i++) {
+        T9IndexEntry entry;
+        memcpy_P(&entry, &t9_index[prefixMatches[i].indexPos], sizeof(T9IndexEntry));
+        if (keyDigitCount(entry.key) != targetLen) continue;
+        if (i == prefixSelectedIdx) {
+            foundCurrent = true;
+            break;
+        }
+        filteredIdx++;
+    }
+    if (!foundCurrent) filteredIdx = 0;
+    int prevFiltered = (filteredIdx - 1 + count) % count;
+
+    int seen = 0;
+    for (int i = 0; i < prefixCandidateCount; i++) {
+        T9IndexEntry entry;
+        memcpy_P(&entry, &t9_index[prefixMatches[i].indexPos], sizeof(T9IndexEntry));
+        if (keyDigitCount(entry.key) != targetLen) continue;
+        if (seen == prevFiltered) {
+            prefixSelectedIdx = i;
+            return;
+        }
+        seen++;
+    }
+}
+
+int T9Predict::getSingleKeyLetterCount(char digit) const {
+    if (digit < '2' || digit > '9') return 0;
+    switch (digit) {
+        case '7':
+        case '9':
+            return 4;
+        default:
+            return 3;
+    }
+}
+
+const char* T9Predict::getSingleKeyLetter(char digit, int index) const {
+    static const char* letters[] = {
+        "", "", "abc", "def", "ghi", "jkl", "mno", "pqrs", "tuv", "wxyz"
+    };
+    static char out[2];
+    if (digit < '2' || digit > '9') return nullptr;
+    const char* set = letters[digit - '0'];
+    int count = getSingleKeyLetterCount(digit);
+    if (index < 0 || index >= count) return nullptr;
+    out[0] = set[index];
+    out[1] = '\0';
+    return out;
+}
+
 // --- Private helpers ---
 
 // All keys are left-aligned to 15 decimal digits.
@@ -243,10 +358,13 @@ void T9Predict::updateCandidates() {
 // All keys sharing the same N-digit prefix fall in a contiguous range.
 // Not used with left-aligned keys, but kept for API compatibility.
 int T9Predict::keyDigitCount(uint64_t key) {
-    if (key == 0) return 1;
-    int count = 0;
-    while (key > 0) { count++; key /= 10; }
-    return count;
+    if (key == 0) return 0;
+    int trailingZeros = 0;
+    while ((key % 10ULL) == 0ULL && trailingZeros < KEY_WIDTH) {
+        trailingZeros++;
+        key /= 10ULL;
+    }
+    return KEY_WIDTH - trailingZeros;
 }
 
 bool T9Predict::keyStartsWith(uint64_t key, uint64_t prefix, int prefixLen) {
@@ -276,16 +394,25 @@ void T9Predict::updatePrefixCandidates() {
         else lo = mid + 1;
     }
 
-    // Scan forward while keys are within range
+    // Pass 1: exact-length matches first.
     for (int i = firstIdx; i < (int)T9_INDEX_COUNT && prefixCandidateCount < MAX_PREFIX_MATCHES; i++) {
         T9IndexEntry entry;
         memcpy_P(&entry, &t9_index[i], sizeof(T9IndexEntry));
         if (entry.key >= rangeEnd) break;
+        if (keyDigitCount(entry.key) != digitCount) continue;
         prefixMatches[prefixCandidateCount].indexPos = i;
         prefixMatches[prefixCandidateCount].wordIdx = 0;
         prefixCandidateCount++;
     }
 
-    // The exact match (indexPos) is already included since it falls in range.
-    // No separate Pass 1 needed.
+    // Pass 2: longer keys that share the same prefix.
+    for (int i = firstIdx; i < (int)T9_INDEX_COUNT && prefixCandidateCount < MAX_PREFIX_MATCHES; i++) {
+        T9IndexEntry entry;
+        memcpy_P(&entry, &t9_index[i], sizeof(T9IndexEntry));
+        if (entry.key >= rangeEnd) break;
+        if (keyDigitCount(entry.key) <= digitCount) continue;
+        prefixMatches[prefixCandidateCount].indexPos = i;
+        prefixMatches[prefixCandidateCount].wordIdx = 0;
+        prefixCandidateCount++;
+    }
 }

@@ -2,8 +2,8 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/hal.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TRUTH_HARDWARE.md Sections 0, 0.1, 1, 2, 3
-// LOG_REF: 2026-04-01
+// TRUTH_LINK: TRUTH_HARDWARE.md Section 2
+// LOG_REF: 2026-04-22
 //
 
 #include "hal.h"
@@ -53,7 +53,7 @@ char keyMap[ROWS][COLS] = {
 // Repeatable key flags - mirrors keyMap layout
 // true = key will auto-repeat when held (non-T9 keys only)
 bool keyRepeatMap[ROWS][COLS] = {
-  {false, true,  true,  true,  true },  // ALT, LEFT, 0, RIGHT, DOWN
+    {false, true,  false, true,  true },  // ALT, LEFT, 0, RIGHT, DOWN
   {false, false, false, false, true },  // TAB, 4, 5, 6, ENTER
   {false, false, false, false, true },  // SHIFT, 7, 8, 9, UP
   {false, false, false, false, true }   // ESC, 1, 2, 3, BKSP

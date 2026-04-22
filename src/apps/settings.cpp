@@ -1,8 +1,8 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/apps/settings.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TRUTH_HARDWARE.md Sections 0, 3
-// LOG_REF: 2026-04-02
+// TRUTH_LINK: TACTICAL_TODO VERIFICATION
+// LOG_REF: 2026-04-22
 // Description: Settings app — brightness, sleep toggle, key tester, T9 editor, SD card info.
 
 #include "settings.h"
@@ -34,7 +34,7 @@ static const char* getKeyName(char key) {
 // Multi-tap character maps (same layout as t9_engine.cpp)
 static const char* multiTapMap[] = {
     " 0",        // 0
-    ".,?!1",     // 1
+    ".,?!1()[]{}<>:;\"'`=+-*/%#_\\|&$", // 1 (Lua coding symbols)
     "abc2",      // 2
     "def3",      // 3
     "ghi4",      // 4
@@ -44,6 +44,83 @@ static const char* multiTapMap[] = {
     "tuv8",      // 8
     "wxyz9"      // 9
 };
+
+static char getMatchingBracket(char left) {
+    switch (left) {
+        case '(': return ')';
+        case '[': return ']';
+        case '{': return '}';
+        case '<': return '>';
+        default:  return '\0';
+    }
+}
+
+static void insertCharWithAutoBracket(String& text, int& cursor, char c) {
+    char right = getMatchingBracket(c);
+    if (right != '\0') {
+        String pair = String(c) + String(right);
+        text = text.substring(0, cursor) + pair + text.substring(cursor);
+        cursor += 1; // keep cursor between brackets
+        return;
+    }
+    text = text.substring(0, cursor) + String(c) + text.substring(cursor);
+    cursor += 1;
+}
+
+static void drawHighlightedChoiceBar(int xStart, int baselineY, const char* choices, int selectedIndex) {
+    if (!choices) return;
+
+    int count = strlen(choices);
+    if (count <= 0) return;
+    if (selectedIndex < 0) selectedIndex = 0;
+    if (selectedIndex >= count) selectedIndex = count - 1;
+
+    int widths[40];
+    int safeCount = min(count, 40);
+    for (int i = 0; i < safeCount; i++) {
+        char item[2] = {choices[i], '\0'};
+        widths[i] = u8g2.getStrWidth(item) + 2;
+    }
+
+    int startIndex = 0;
+    int widthToSelected = 0;
+    for (int i = 0; i < selectedIndex && i < safeCount; i++) widthToSelected += widths[i];
+    while (widthToSelected > 56 && startIndex < selectedIndex) {
+        widthToSelected -= widths[startIndex];
+        startIndex++;
+    }
+
+    int x = xStart;
+    if (startIndex > 0) {
+        u8g2.drawStr(x, baselineY, "<");
+        x += u8g2.getStrWidth("<") + 2;
+    }
+
+    bool clippedRight = false;
+    for (int i = startIndex; i < safeCount; i++) {
+        char item[2] = {choices[i], '\0'};
+        int charWidth = u8g2.getStrWidth(item);
+        int paddedWidth = charWidth + 2;
+        if (x + paddedWidth > 122) {
+            clippedRight = (i < safeCount);
+            break;
+        }
+
+        if (i == selectedIndex) {
+            u8g2.drawBox(x - 1, baselineY - 7, paddedWidth + 1, 9);
+            u8g2.setDrawColor(0);
+            u8g2.drawStr(x, baselineY, item);
+            u8g2.setDrawColor(1);
+        } else {
+            u8g2.drawStr(x, baselineY, item);
+        }
+        x += paddedWidth;
+    }
+
+    if (clippedRight) {
+        u8g2.drawStr(123, baselineY, ">");
+    }
+}
 
 SettingsApp::SettingsApp() {
     selectedIndex = 0;
@@ -94,7 +171,7 @@ bool SettingsApp::isInSubmenu() {
 
 void SettingsApp::update() {
     // Auto-commit multi-tap after timeout (ABC mode or T9 fallback)
-    if (inT9Editor && (t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') {
+    if (inT9Editor && !t9SavePromptActive && (t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') {
         if (millis() - t9TapTime > MULTITAP_TIMEOUT) {
             // Check if the character about to be committed is a separator
             bool isSeparator = false;
@@ -106,12 +183,21 @@ void SettingsApp::update() {
             if (isSeparator) t9Fallback = false;
         }
     }
-    // In T9 mode, key 1 symbol cycling: clear tap state on timeout
-    // (char is already inserted inline, just stop the cycle)
-    if (inT9Editor && t9InputMode == MODE_T9 && t9TapKey == '1') {
-        if (millis() - t9TapTime > MULTITAP_TIMEOUT) {
-            t9TapKey = '\0';
-            t9TapIndex = 0;
+
+    if (inT9Editor && !t9SavePromptActive && t9InputMode == MODE_T9 && t9ZeroPending) {
+        bool zeroStillPressed = false;
+        for (int i = 0; i < activeKeyCount; i++) {
+            if (activeKeys[i] == '0') {
+                zeroStillPressed = true;
+                break;
+            }
+        }
+
+        if (!zeroStillPressed) {
+            t9Text = t9Text.substring(0, t9Cursor) + " " + t9Text.substring(t9Cursor);
+            t9Cursor++;
+            t9CursorMoveTime = millis();
+            t9ZeroPending = false;
         }
     }
 }
@@ -781,6 +867,11 @@ void SettingsApp::t9EditorReset() {
     t9TapTime = 0;
     t9ScrollOffset = 0;
     t9CursorMoveTime = 0;
+    t9ViewMode = VIEW_FULL;
+    t9SavePromptActive = false;
+    t9SavePromptSelection = 0;
+    t9SingleKeyCycleIndex = 0;
+    t9ZeroPending = false;
     t9Fallback = false;
     t9FallbackStart = 0;
 }
@@ -798,17 +889,47 @@ String SettingsApp::t9GetMultiTapChar() const {
 void SettingsApp::t9CommitMultiTap() {
     if (t9TapKey == '\0') return;
     String c = t9GetMultiTapChar();
-    t9Text = t9Text.substring(0, t9Cursor) + c + t9Text.substring(t9Cursor);
-    t9Cursor += c.length();
+    if (c.length() > 0) {
+        insertCharWithAutoBracket(t9Text, t9Cursor, c[0]);
+    }
     t9TapKey = '\0';
     t9TapIndex = 0;
+    t9TapTime = 0;
 }
 
 void SettingsApp::t9CommitPrediction() {
-    // Use prefix candidate: show the best word truncated to digitCount chars
+    // Use single-key letter-first ordering for one digit, then dictionary prefix.
     int dc = t9predict.getDigitCount();
-    const char* word = t9predict.getSelectedPrefixWord();
-    if (!word) {
+    String commitText = "";
+
+    if (dc == 1) {
+        const char* digs = t9predict.getDigits();
+        char digit = (digs && digs[0]) ? digs[0] : '\0';
+        int letterCount = t9predict.getSingleKeyLetterCount(digit);
+        int dictCount = t9predict.getPrefixCandidateCount();
+        int total = letterCount + dictCount;
+        if (total > 0) {
+            int idx = t9SingleKeyCycleIndex % total;
+            if (idx < letterCount) {
+                const char* c = t9predict.getSingleKeyLetter(digit, idx);
+                if (c) commitText = c;
+            } else {
+                const char* word = t9predict.getPrefixCandidate(idx - letterCount);
+                if (word) {
+                    commitText = word;
+                    if ((int)commitText.length() > dc) commitText = commitText.substring(0, dc);
+                }
+            }
+        }
+    } else {
+        const char* word = t9predict.getSelectedPrefixWord();
+        if (word) {
+            commitText = word;
+            if ((int)commitText.length() > dc) commitText = commitText.substring(0, dc);
+        }
+    }
+
+    if (commitText.length() == 0) {
         // No prefix match — commit raw digits as literal text
         const char* digs = t9predict.getDigits();
         if (digs && dc > 0) {
@@ -817,22 +938,26 @@ void SettingsApp::t9CommitPrediction() {
             t9Cursor += d.length();
         }
         t9predict.reset();
+        t9SingleKeyCycleIndex = 0;
         return;
     }
-    String w = word;
-    // Truncate to digitCount characters (letters priority preview)
-    if ((int)w.length() > dc) w = w.substring(0, dc);
+
     // Apply shift
-    if (t9ShiftMode == 1 && w.length() > 0) {
-        w[0] = toupper(w[0]);
+    if (t9ShiftMode == 1 && commitText.length() > 0) {
+        commitText[0] = toupper(commitText[0]);
     } else if (t9ShiftMode == 2) {
-        for (int i = 0; i < (int)w.length(); i++) {
-            if (w[i] >= 'a' && w[i] <= 'z') w[i] -= 32;
+        for (int i = 0; i < (int)commitText.length(); i++) {
+            if (commitText[i] >= 'a' && commitText[i] <= 'z') commitText[i] -= 32;
         }
     }
-    t9Text = t9Text.substring(0, t9Cursor) + w + t9Text.substring(t9Cursor);
-    t9Cursor += w.length();
+    if (commitText.length() == 1) {
+        insertCharWithAutoBracket(t9Text, t9Cursor, commitText[0]);
+    } else {
+        t9Text = t9Text.substring(0, t9Cursor) + commitText + t9Text.substring(t9Cursor);
+        t9Cursor += commitText.length();
+    }
     t9predict.reset();
+    t9SingleKeyCycleIndex = 0;
     // Auto-reset shift to lowercase after firstCap commit
     if (t9ShiftMode == 1) t9ShiftMode = 0;
 }
@@ -871,34 +996,87 @@ void SettingsApp::t9MoveCursorVertically(int dir) {
     }
 }
 
-void SettingsApp::t9HandleInput(char key) {
-    if (key == KEY_ESC) {
+void SettingsApp::t9HandleSavePromptInput(char key) {
+    if (!t9SavePromptActive) return;
+
+    if (key == KEY_LEFT || key == KEY_UP || key == KEY_ESC) {
+        t9SavePromptSelection = 0;
+        return;
+    }
+    if (key == KEY_RIGHT || key == KEY_DOWN || key == KEY_TAB) {
+        t9SavePromptSelection = 1;
+        return;
+    }
+    if (key == KEY_ENTER) {
+        bool saveSelected = (t9SavePromptSelection == 1);
+        if (saveSelected) {
+            Serial.println("[T9] Save stub: requested, no filesystem write performed");
+        }
+        t9SavePromptActive = false;
         inT9Editor = false;
         return;
     }
+}
 
-    // ALT: cycle T9 → ABC → 123
+void SettingsApp::renderT9SavePrompt() {
+    u8g2.drawBox(16, 18, 96, 28);
+    u8g2.setDrawColor(0);
+    u8g2.drawStr(22, 30, "Save buffer?");
+
+    const bool noSel = (t9SavePromptSelection == 0);
+    if (noSel) {
+        u8g2.drawBox(24, 34, 26, 10);
+        u8g2.setDrawColor(1);
+        u8g2.drawStr(29, 42, "No");
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(68, 42, "Yes");
+    } else {
+        u8g2.drawStr(29, 42, "No");
+        u8g2.drawBox(62, 34, 30, 10);
+        u8g2.setDrawColor(1);
+        u8g2.drawStr(68, 42, "Yes");
+    }
+    u8g2.setDrawColor(1);
+}
+
+void SettingsApp::t9HandleInput(char key) {
+    if (t9SavePromptActive) {
+        t9HandleSavePromptInput(key);
+        return;
+    }
+
+    if (t9ZeroPending && key != '0') {
+        t9Text = t9Text.substring(0, t9Cursor) + " " + t9Text.substring(t9Cursor);
+        t9Cursor++;
+        t9CursorMoveTime = millis();
+        t9ZeroPending = false;
+    }
+
+    if (key == KEY_ESC) {
+        t9SavePromptActive = true;
+        t9SavePromptSelection = 0;
+        return;
+    }
+
+    // ALT: cycle T9 -> ABC -> 123
     if (key == KEY_ALT) {
-        // Commit any pending input before switching
         if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') t9CommitMultiTap();
         if (t9InputMode == MODE_T9 && t9predict.hasInput()) t9CommitPrediction();
         t9Fallback = false;
-        // Cycle mode
+        t9SingleKeyCycleIndex = 0;
         if (t9InputMode == MODE_T9)       t9InputMode = MODE_ABC;
-        else if (t9InputMode == MODE_ABC)  t9InputMode = MODE_123;
+        else if (t9InputMode == MODE_ABC) t9InputMode = MODE_123;
         else                               t9InputMode = MODE_T9;
         t9predict.reset();
         t9TapKey = '\0';
         return;
     }
 
-    // SHIFT: cycle lower → firstCap → allCaps
     if (key == KEY_SHIFT) {
         t9ShiftMode = (t9ShiftMode + 1) % 3;
         return;
     }
 
-    // BACKSPACE
     if (key == KEY_BKSP) {
         t9CursorMoveTime = millis();
         if (t9InputMode == MODE_ABC || (t9InputMode == MODE_T9 && t9Fallback)) {
@@ -908,37 +1086,39 @@ void SettingsApp::t9HandleInput(char key) {
             } else if (t9Cursor > 0) {
                 t9Text.remove(t9Cursor - 1, 1);
                 t9Cursor--;
-                // If backspaced to fallback start, exit fallback
                 if (t9Fallback && t9Cursor <= t9FallbackStart) {
                     t9Fallback = false;
                 }
             }
         } else if (t9InputMode == MODE_T9) {
-            if (t9predict.hasInput()) {
+            if (t9ZeroPending) {
+                t9ZeroPending = false;
+            } else if (t9TapKey == '1') {
+                t9TapKey = '\0';
+                t9TapIndex = 0;
+                t9TapTime = 0;
+            } else if (t9predict.hasInput()) {
                 t9predict.popDigit();
+                t9SingleKeyCycleIndex = 0;
             } else if (t9Cursor > 0) {
                 t9Text.remove(t9Cursor - 1, 1);
                 t9Cursor--;
             }
-        } else {
-            // MODE_123
-            if (t9Cursor > 0) {
-                t9Text.remove(t9Cursor - 1, 1);
-                t9Cursor--;
-            }
+        } else if (t9Cursor > 0) {
+            t9Text.remove(t9Cursor - 1, 1);
+            t9Cursor--;
         }
         return;
     }
 
-    // ENTER: commit current input; if nothing pending, insert newline
     if (key == KEY_ENTER) {
         t9CursorMoveTime = millis();
-        if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') {
+        if (((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') ||
+            (t9InputMode == MODE_T9 && t9TapKey == '1')) {
             t9CommitMultiTap();
         } else if (t9InputMode == MODE_T9 && t9predict.hasInput()) {
             t9CommitPrediction();
         } else {
-            // No pending input — insert newline
             t9Text = t9Text.substring(0, t9Cursor) + "\n" + t9Text.substring(t9Cursor);
             t9Cursor++;
         }
@@ -946,224 +1126,246 @@ void SettingsApp::t9HandleInput(char key) {
         return;
     }
 
-    // TAB: always insert newline (commit pending first)
+    // TAB cycles view modes and no longer inserts newline.
     if (key == KEY_TAB) {
+        if (t9ViewMode == VIEW_FULL) t9ViewMode = VIEW_FULL_LINENO;
+        else if (t9ViewMode == VIEW_FULL_LINENO) t9ViewMode = VIEW_MIN_LINENO;
+        else if (t9ViewMode == VIEW_MIN_LINENO) t9ViewMode = VIEW_MIN;
+        else t9ViewMode = VIEW_FULL;
+        return;
+    }
+
+    if (t9InputMode == MODE_T9 && t9TapKey == '1' &&
+        (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT)) {
+        const char* map = multiTapMap[1];
+        int count = strlen(map);
+        if (count > 0) {
+            if (key == KEY_UP || key == KEY_LEFT) t9TapIndex = (t9TapIndex - 1 + count) % count;
+            else t9TapIndex = (t9TapIndex + 1) % count;
+        }
+        t9TapTime = millis();
+        return;
+    }
+
+    if (key == KEY_UP || key == KEY_DOWN) {
+        t9CursorMoveTime = millis();
+        if (t9InputMode == MODE_T9 && t9predict.hasInput() && !t9Fallback) {
+            if (t9predict.getDigitCount() == 1) {
+                const char* digs = t9predict.getDigits();
+                char digit = (digs && digs[0]) ? digs[0] : '\0';
+                int letterCount = t9predict.getSingleKeyLetterCount(digit);
+                int dictCount = t9predict.getPrefixCandidateCount();
+                int total = letterCount + dictCount;
+                if (total > 0) {
+                    if (key == KEY_UP) t9SingleKeyCycleIndex = (t9SingleKeyCycleIndex - 1 + total) % total;
+                    else t9SingleKeyCycleIndex = (t9SingleKeyCycleIndex + 1) % total;
+                }
+            } else {
+                if (key == KEY_UP) t9predict.prevPrefixCandidate();
+                else t9predict.nextPrefixCandidate();
+            }
+        } else {
+            if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') t9CommitMultiTap();
+            if (t9InputMode == MODE_T9 && t9predict.hasInput()) t9CommitPrediction();
+            t9Fallback = false;
+            t9MoveCursorVertically(key == KEY_UP ? -1 : 1);
+        }
+        return;
+    }
+
+    if (key == KEY_LEFT || key == KEY_RIGHT) {
         t9CursorMoveTime = millis();
         if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') t9CommitMultiTap();
         if (t9InputMode == MODE_T9 && t9predict.hasInput()) t9CommitPrediction();
         t9Fallback = false;
-        t9Text = t9Text.substring(0, t9Cursor) + "\n" + t9Text.substring(t9Cursor);
+        if (key == KEY_LEFT && t9Cursor > 0) t9Cursor--;
+        if (key == KEY_RIGHT && t9Cursor < (int)t9Text.length()) t9Cursor++;
+        return;
+    }
+
+    if (key < '0' || key > '9') return;
+
+    if ((t9InputMode == MODE_T9 || t9InputMode == MODE_ABC) && isKeyHeld(key)) {
+        if (t9InputMode == MODE_T9 && key == '0') {
+            return;
+        }
+        if (t9InputMode == MODE_T9 && t9TapKey == '1') {
+            if (key == '1') {
+                t9TapKey = '\0';
+                t9TapIndex = 0;
+                t9TapTime = 0;
+            } else {
+                t9CommitMultiTap();
+            }
+        } else if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') {
+            t9TapKey = '\0';
+            t9TapIndex = 0;
+        }
+        if (t9InputMode == MODE_T9 && !t9Fallback) {
+            if (t9predict.hasInput()) {
+                t9predict.popDigit();
+                if (t9predict.hasInput()) t9CommitPrediction();
+            }
+        }
+        t9Text = t9Text.substring(0, t9Cursor) + String(key) + t9Text.substring(t9Cursor);
+        t9Cursor++;
+        t9CursorMoveTime = millis();
+        return;
+    }
+
+    if (t9InputMode == MODE_123 && isKeyHeld(key)) {
+        return;
+    }
+
+    if (t9InputMode == MODE_123) {
+        t9Text = t9Text.substring(0, t9Cursor) + String(key) + t9Text.substring(t9Cursor);
         t9Cursor++;
         return;
     }
 
-    // UP/DOWN: cycle candidates when T9 has input, otherwise move cursor vertically
-    if (key == KEY_UP) {
-        t9CursorMoveTime = millis();
-        if (t9InputMode == MODE_T9 && t9predict.hasInput() && !t9Fallback) {
-            t9predict.prevPrefixCandidate();
-        } else {
-            // Commit pending, then move cursor up
-            if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') t9CommitMultiTap();
-            if (t9InputMode == MODE_T9 && t9predict.hasInput()) t9CommitPrediction();
+    if (t9InputMode == MODE_ABC || (t9InputMode == MODE_T9 && t9Fallback)) {
+        if (t9Fallback && key == '0') {
+            if (t9TapKey != '\0') t9CommitMultiTap();
             t9Fallback = false;
-            t9MoveCursorVertically(-1);
+            t9Text = t9Text.substring(0, t9Cursor) + " " + t9Text.substring(t9Cursor);
+            t9Cursor++;
+            return;
         }
-        return;
-    }
-    if (key == KEY_DOWN) {
-        t9CursorMoveTime = millis();
-        if (t9InputMode == MODE_T9 && t9predict.hasInput() && !t9Fallback) {
-            t9predict.nextPrefixCandidate();
+        unsigned long now = millis();
+        if (key == t9TapKey && (now - t9TapTime < MULTITAP_TIMEOUT)) {
+            const char* map = multiTapMap[key - '0'];
+            t9TapIndex = (t9TapIndex + 1) % strlen(map);
         } else {
-            if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') t9CommitMultiTap();
-            if (t9InputMode == MODE_T9 && t9predict.hasInput()) t9CommitPrediction();
-            t9Fallback = false;
-            t9MoveCursorVertically(1);
+            if (t9TapKey != '\0') t9CommitMultiTap();
+            t9TapKey = key;
+            t9TapIndex = 0;
         }
+        t9TapTime = now;
         return;
     }
 
-    // LEFT/RIGHT: commit pending + move cursor horizontally (TASK_4)
-    if (key == KEY_LEFT) {
-        t9CursorMoveTime = millis();
-        if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') t9CommitMultiTap();
-        if (t9InputMode == MODE_T9 && t9predict.hasInput()) t9CommitPrediction();
-        t9Fallback = false;
-        if (t9Cursor > 0) t9Cursor--;
-        return;
-    }
-    if (key == KEY_RIGHT) {
-        t9CursorMoveTime = millis();
-        if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') t9CommitMultiTap();
-        if (t9InputMode == MODE_T9 && t9predict.hasInput()) t9CommitPrediction();
-        t9Fallback = false;
-        if (t9Cursor < (int)t9Text.length()) t9Cursor++;
-        return;
-    }
-
-    // DIGIT KEYS (0-9)
-    if (key >= '0' && key <= '9') {
-        // Long-press in T9/ABC mode: replace the pending letter with the digit
-        if ((t9InputMode == MODE_T9 || t9InputMode == MODE_ABC) && isKeyHeld(key)) {
-            if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') {
-                // Cancel the pending multi-tap character (don't commit the letter)
-                t9TapKey = '\0';
-                t9TapIndex = 0;
-            }
-            if (t9InputMode == MODE_T9 && !t9Fallback) {
-                // For key 1 symbol cycling, undo the last inserted symbol
-                if (t9TapKey == '1' && t9Cursor > 0) {
-                    t9Text.remove(t9Cursor - 1, 1);
-                    t9Cursor--;
-                    t9TapKey = '\0';
-                    t9TapIndex = 0;
-                }
-                // Pop the digit that the initial short press added to prediction,
-                // so the digit replaces the letter it contributed.
-                if (t9predict.hasInput()) {
-                    t9predict.popDigit();
-                    if (t9predict.hasInput()) t9CommitPrediction();
-                }
-            }
-            t9Text = t9Text.substring(0, t9Cursor) + String(key) + t9Text.substring(t9Cursor);
+    // MODE_T9 predictive
+    if (key == '0') {
+        if (t9TapKey == '1') t9CommitMultiTap();
+        if (t9predict.hasInput()) t9CommitPrediction();
+        if (t9ZeroPending && isKeyHeld('0')) {
+            t9Text = t9Text.substring(0, t9Cursor) + "0" + t9Text.substring(t9Cursor);
             t9Cursor++;
             t9CursorMoveTime = millis();
-            return;
+            t9ZeroPending = false;
+        } else if (!t9ZeroPending) {
+            t9ZeroPending = true;
         }
+        return;
+    }
 
-        // In 123 mode, long-press just means the key is held — digit already
-        // inserted on short press, so ignore the long-press event.
-        if (t9InputMode == MODE_123 && isKeyHeld(key)) {
-            return;
-        }
-
-        if (t9InputMode == MODE_123) {
-            // Direct digit insertion
-            t9Text = t9Text.substring(0, t9Cursor) + String(key) + t9Text.substring(t9Cursor);
-            t9Cursor++;
-        } else if (t9InputMode == MODE_ABC || (t9InputMode == MODE_T9 && t9Fallback)) {
-            // Multi-tap mode (also used during T9 fallback)
-            if (t9Fallback && key == '0') {
-                // Space exits fallback, return to normal T9
-                if (t9TapKey != '\0') t9CommitMultiTap();
-                t9Fallback = false;
-                t9Text = t9Text.substring(0, t9Cursor) + " " + t9Text.substring(t9Cursor);
-                t9Cursor++;
-                return;
-            }
-            unsigned long now = millis();
-            if (key == t9TapKey && (now - t9TapTime < MULTITAP_TIMEOUT)) {
-                const char* map = multiTapMap[key - '0'];
-                t9TapIndex = (t9TapIndex + 1) % strlen(map);
-            } else {
-                if (t9TapKey != '\0') t9CommitMultiTap();
-                t9TapKey = key;
-                t9TapIndex = 0;
-            }
-            t9TapTime = now;
+    if (key == '1') {
+        if (t9predict.hasInput()) t9CommitPrediction();
+        const char* map = multiTapMap[1];
+        if (t9TapKey == '1') {
+            t9TapIndex = (t9TapIndex + 1) % strlen(map);
         } else {
-            // MODE_T9: predictive mode
-            if (key == '0') {
-                // 0 = space (commit current word + space)
-                if (t9predict.hasInput()) t9CommitPrediction();
-                t9Text = t9Text.substring(0, t9Cursor) + " " + t9Text.substring(t9Cursor);
-                t9Cursor++;
-            } else if (key == '1') {
-                // 1 = symbol cycling (same as ABC mode multi-tap on key 1)
-                if (t9predict.hasInput()) t9CommitPrediction();
-                unsigned long now = millis();
-                if (t9TapKey == '1' && (now - t9TapTime < MULTITAP_TIMEOUT)) {
-                    // Cycle through symbols
-                    // Remove previously inserted multi-tap char
-                    if (t9Cursor > 0) {
-                        t9Text.remove(t9Cursor - 1, 1);
-                        t9Cursor--;
-                    }
-                    const char* map = multiTapMap[1]; // ".,?!1"
-                    t9TapIndex = (t9TapIndex + 1) % strlen(map);
-                } else {
-                    t9TapKey = '1';
-                    t9TapIndex = 0;
-                }
-                t9TapTime = now;
-                // Insert current symbol
-                char c = multiTapMap[1][t9TapIndex];
-                t9Text = t9Text.substring(0, t9Cursor) + String(c) + t9Text.substring(t9Cursor);
-                t9Cursor++;
-            } else {
-                // 2-9: predictive digit
-                t9predict.pushDigit(key);
-                // If no prefix match after this digit, fall back to ABC
-                if (t9predict.getPrefixCandidateCount() == 0) {
-                    // Pop the failed digit
-                    t9predict.popDigit();
-                    // Commit whatever was successfully predicted so far
-                    if (t9predict.hasInput()) t9CommitPrediction();
-                    // Enter fallback-ABC mode
-                    t9Fallback = true;
-                    t9FallbackStart = t9Cursor;
-                    // Process the failed digit as ABC multi-tap
-                    t9TapKey = key;
-                    t9TapIndex = 0;
-                    t9TapTime = millis();
-                }
-            }
+            t9TapKey = '1';
+            t9TapIndex = 0;
         }
+        t9TapTime = millis();
+        return;
+    }
+
+    if (t9TapKey == '1') t9CommitMultiTap();
+    t9predict.pushDigit(key);
+    t9SingleKeyCycleIndex = 0;
+    if (t9predict.getPrefixCandidateCount() == 0) {
+        t9predict.popDigit();
+        if (t9predict.hasInput()) t9CommitPrediction();
+        t9Fallback = true;
+        t9FallbackStart = t9Cursor;
+        t9TapKey = key;
+        t9TapIndex = 0;
+        t9TapTime = millis();
     }
 }
 
 void SettingsApp::renderT9Editor() {
-    // Header: mode indicator + shift state
+    const bool showHeader = (t9ViewMode == VIEW_FULL || t9ViewMode == VIEW_FULL_LINENO);
+    const bool showFooter = (t9ViewMode == VIEW_FULL || t9ViewMode == VIEW_FULL_LINENO);
+    const bool showLineNumbers = (t9ViewMode == VIEW_FULL_LINENO || t9ViewMode == VIEW_MIN_LINENO);
+
     const char* modeStr = t9Fallback ? "?ABC" :
                           (t9InputMode == MODE_T9) ? "T9" :
                           (t9InputMode == MODE_ABC) ? "ABC" : "123";
     const char* shiftStr = (t9ShiftMode == 2) ? "^^" :
                            (t9ShiftMode == 1) ? "^" : "";
-    char headerRight[16];
-    snprintf(headerRight, sizeof(headerRight), "%s%s", shiftStr, modeStr);
-    GUI::drawHeader("T9 EDITOR", headerRight);
+    if (showHeader) {
+        char headerRight[16];
+        snprintf(headerRight, sizeof(headerRight), "%s%s", shiftStr, modeStr);
+        GUI::drawHeader("T9 EDITOR", headerRight);
+    }
 
     GUI::setFontSmall();
 
-    // --- Text area (lines 13-44, ~4 lines of text) ---
     String displayText = t9Text;
     int previewInsertPos = t9Cursor;
     String preview = "";
 
-    if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') {
+    if (t9ZeroPending) {
+        preview = " ";
+    } else if (t9InputMode == MODE_T9 && t9TapKey == '1') {
+        preview = t9GetMultiTapChar();
+    } else if ((t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') {
         preview = t9GetMultiTapChar();
     } else if (t9InputMode == MODE_T9 && t9predict.hasInput()) {
         int dc = t9predict.getDigitCount();
-        const char* word = t9predict.getSelectedPrefixWord();
-        if (word) {
-            preview = word;
-            if ((int)preview.length() > dc) preview = preview.substring(0, dc);
-            // Apply shift to preview
-            if (t9ShiftMode == 1 && preview.length() > 0) {
-                preview[0] = toupper(preview[0]);
-            } else if (t9ShiftMode == 2) {
-                for (int i = 0; i < (int)preview.length(); i++) {
-                    if (preview[i] >= 'a' && preview[i] <= 'z') preview[i] -= 32;
+        if (dc == 1) {
+            const char* digs = t9predict.getDigits();
+            char digit = (digs && digs[0]) ? digs[0] : '\0';
+            int letterCount = t9predict.getSingleKeyLetterCount(digit);
+            int dictCount = t9predict.getPrefixCandidateCount();
+            int total = letterCount + dictCount;
+            if (total > 0) {
+                int idx = t9SingleKeyCycleIndex % total;
+                if (idx < letterCount) {
+                    const char* c = t9predict.getSingleKeyLetter(digit, idx);
+                    if (c) preview = c;
+                } else {
+                    const char* word = t9predict.getPrefixCandidate(idx - letterCount);
+                    if (word) {
+                        preview = word;
+                        if ((int)preview.length() > dc) preview = preview.substring(0, dc);
+                    }
                 }
             }
         } else {
-            preview = t9predict.getDigits();
+            const char* word = t9predict.getSelectedPrefixWord();
+            if (word) {
+                preview = word;
+                if ((int)preview.length() > dc) preview = preview.substring(0, dc);
+            }
+        }
+        if (preview.length() == 0) preview = t9predict.getDigits();
+
+        if (t9ShiftMode == 1 && preview.length() > 0) {
+            preview[0] = toupper(preview[0]);
+        } else if (t9ShiftMode == 2) {
+            for (int i = 0; i < (int)preview.length(); i++) {
+                if (preview[i] >= 'a' && preview[i] <= 'z') preview[i] -= 32;
+            }
         }
     }
 
-    // Insert preview into display text
     if (preview.length() > 0) {
         displayText = displayText.substring(0, previewInsertPos) + preview + displayText.substring(previewInsertPos);
     }
 
-    // Multi-line rendering with vertical scroll
-    int maxVisibleLines = 4;
     int lineHeight = 9;
-    int maxCharsPerLine = 21;
+    int textTop = showHeader ? 13 : 1;
+    int textBottom = showFooter ? 53 : 63;
+    int maxVisibleLines = (textBottom - textTop + 1) / lineHeight;
+    if (maxVisibleLines < 1) maxVisibleLines = 1;
+    int maxCharsPerLine = showLineNumbers ? 18 : 21;
+    int textX = showLineNumbers ? 12 : 1;
     int textLen = displayText.length();
 
-    // Break text into lines
     int lineStarts[64];
     int lineEnds[64];
     int totalLines = 0;
@@ -1180,11 +1382,11 @@ void SettingsApp::renderT9Editor() {
         totalLines++;
         pos = lineEnd;
         if (pos < textLen && displayText[pos] == '\n') pos++;
+        if (textLen == 0) break;
         if (pos == textLen && lineEnd == textLen && displayText[textLen - 1] != '\n') break;
     }
-    if (totalLines == 0) totalLines = 1; // at least one empty line
+    if (totalLines == 0) totalLines = 1;
 
-    // Find which line the cursor is on
     int cursorLine = 0;
     for (int i = 0; i < totalLines; i++) {
         if (t9Cursor >= lineStarts[i] && t9Cursor <= lineEnds[i]) {
@@ -1193,19 +1395,20 @@ void SettingsApp::renderT9Editor() {
         }
     }
 
-    // Auto-scroll to keep cursor visible
     if (cursorLine < t9ScrollOffset) t9ScrollOffset = cursorLine;
     if (cursorLine >= t9ScrollOffset + maxVisibleLines) t9ScrollOffset = cursorLine - maxVisibleLines + 1;
 
-    // Compute fallback region in displayText coordinates (inverted rendering)
     int fbDispStart = -1, fbDispEnd = -1;
     if (t9Fallback) {
         fbDispStart = t9FallbackStart;
-        fbDispEnd = t9Cursor + (int)preview.length(); // includes pending multi-tap preview
+        fbDispEnd = t9Cursor + (int)preview.length();
     }
 
-    // Render visible lines
-    int y = 22;
+    if (showLineNumbers) {
+        u8g2.drawVLine(10, textTop, textBottom - textTop + 1);
+    }
+
+    int y = textTop + 9;
     int cursorScreenX = -1, cursorScreenY = -1;
     for (int i = 0; i < maxVisibleLines; i++) {
         int li = t9ScrollOffset + i;
@@ -1214,53 +1417,51 @@ void SettingsApp::renderT9Editor() {
         int lEnd = lineEnds[li];
         String line = displayText.substring(lStart, lEnd);
 
-        // Check if fallback region overlaps this line
+        if (showLineNumbers) {
+            char ln[5];
+            snprintf(ln, sizeof(ln), "%d", li + 1);
+            u8g2.drawStr(1, y, ln);
+        }
+
         if (fbDispStart >= 0 && fbDispStart < lEnd && fbDispEnd > lStart) {
-            int regionS = max(fbDispStart, lStart) - lStart; // local char index
+            int regionS = max(fbDispStart, lStart) - lStart;
             int regionE = min(fbDispEnd, lEnd) - lStart;
 
-            // Draw normal part before fallback
             if (regionS > 0) {
                 String before = line.substring(0, regionS);
-                u8g2.drawStr(1, y, before.c_str());
+                u8g2.drawStr(textX, y, before.c_str());
             }
 
-            // Draw inverted fallback region
             String fbPart = line.substring(regionS, regionE);
-            int xFb = 1 + u8g2.getStrWidth(line.substring(0, regionS).c_str());
+            int xFb = textX + u8g2.getStrWidth(line.substring(0, regionS).c_str());
             int wFb = u8g2.getStrWidth(fbPart.c_str());
             u8g2.drawBox(xFb, y - 7, wFb, 9);
             u8g2.setDrawColor(0);
             u8g2.drawStr(xFb, y, fbPart.c_str());
             u8g2.setDrawColor(1);
 
-            // Draw normal part after fallback
             if (regionE < (int)line.length()) {
                 String after = line.substring(regionE);
-                int xAfter = xFb + wFb;
-                u8g2.drawStr(xAfter, y, after.c_str());
+                u8g2.drawStr(xFb + wFb, y, after.c_str());
             }
         } else {
-            u8g2.drawStr(1, y, line.c_str());
+            u8g2.drawStr(textX, y, line.c_str());
         }
 
-        // Track cursor position
         if (li == cursorLine && cursorScreenX < 0) {
             int localIdx = t9Cursor - lineStarts[li];
             String before = displayText.substring(lineStarts[li], lineStarts[li] + localIdx);
-            cursorScreenX = 1 + u8g2.getStrWidth(before.c_str());
+            cursorScreenX = textX + u8g2.getStrWidth(before.c_str());
             cursorScreenY = y;
         }
         y += lineHeight;
     }
 
-    // Draw cursor
     if (cursorScreenX >= 0) {
         if (preview.length() > 0) {
             int pw = u8g2.getStrWidth(preview.c_str());
             u8g2.drawHLine(cursorScreenX, cursorScreenY + 2, pw);
         } else {
-            // Show solid cursor briefly after movement, then blink
             bool recentMove = (millis() - t9CursorMoveTime < CURSOR_BLINK_RATE);
             if (recentMove || (millis() / CURSOR_BLINK_RATE) % 2) {
                 u8g2.drawVLine(cursorScreenX, cursorScreenY - 7, 8);
@@ -1268,46 +1469,64 @@ void SettingsApp::renderT9Editor() {
         }
     }
 
-    // --- Separator line ---
-    u8g2.drawHLine(0, 54, 128);
-
-    // --- Candidate bar (line 56-63) ---
-    GUI::setFontSmall();
-    if (t9Fallback && t9TapKey != '\0') {
-        // Fallback ABC: show multi-tap map for current key
-        const char* map = multiTapMap[t9TapKey - '0'];
-        char bar[32];
-        snprintf(bar, sizeof(bar), "?[%s] %d/%d", map, t9TapIndex + 1, (int)strlen(map));
-        u8g2.drawStr(1, 62, bar);
-    } else if (t9Fallback) {
-        u8g2.drawStr(1, 62, "?ABC 0:sp exits");
-    } else if (t9InputMode == MODE_T9 && t9predict.hasInput()) {
-        const char* word = t9predict.getSelectedPrefixWord();
-        char bar[40];
-        if (word) {
-            snprintf(bar, sizeof(bar), "%s %d/%d",
-                     word, t9predict.getSelectedPrefixIndex() + 1,
-                     t9predict.getPrefixCandidateCount());
+    if (showFooter) {
+        u8g2.drawHLine(0, 54, 128);
+        GUI::setFontSmall();
+        if (t9Fallback && t9TapKey != '\0') {
+            const char* map = multiTapMap[t9TapKey - '0'];
+            char bar[32];
+            snprintf(bar, sizeof(bar), "?[%s] %d/%d", map, t9TapIndex + 1, (int)strlen(map));
+            u8g2.drawStr(1, 62, bar);
+        } else if (t9Fallback) {
+            u8g2.drawStr(1, 62, "?ABC 0:sp exits");
+        } else if (t9InputMode == MODE_T9 && t9predict.hasInput()) {
+            char bar[40];
+            int dc = t9predict.getDigitCount();
+            if (dc == 1) {
+                const char* digs = t9predict.getDigits();
+                char digit = (digs && digs[0]) ? digs[0] : '\0';
+                int letterCount = t9predict.getSingleKeyLetterCount(digit);
+                int dictCount = t9predict.getPrefixCandidateCount();
+                int total = letterCount + dictCount;
+                if (total > 0) {
+                    int idx = t9SingleKeyCycleIndex % total;
+                    if (idx < letterCount) {
+                        const char* c = t9predict.getSingleKeyLetter(digit, idx);
+                        snprintf(bar, sizeof(bar), "%s %d/%d", c ? c : "?", idx + 1, total);
+                    } else {
+                        const char* w = t9predict.getPrefixCandidate(idx - letterCount);
+                        snprintf(bar, sizeof(bar), "%s %d/%d", w ? w : "?", idx + 1, total);
+                    }
+                } else {
+                    snprintf(bar, sizeof(bar), "? [%s]", t9predict.getDigits());
+                }
+            } else {
+                const char* word = t9predict.getSelectedPrefixWord();
+                if (word) {
+                    snprintf(bar, sizeof(bar), "%s %d/%d", word,
+                             t9predict.getSelectedPrefixIndex() + 1,
+                             t9predict.getPrefixCandidateCount());
+                } else {
+                    snprintf(bar, sizeof(bar), "? [%s]", t9predict.getDigits());
+                }
+            }
+            u8g2.drawStr(1, 62, bar);
+        } else if (t9InputMode == MODE_T9 && t9TapKey == '1') {
+            drawHighlightedChoiceBar(1, 62, multiTapMap[1], t9TapIndex);
+        } else if (t9InputMode == MODE_ABC && t9TapKey != '\0') {
+            const char* map = multiTapMap[t9TapKey - '0'];
+            char bar[32];
+            snprintf(bar, sizeof(bar), "[%s] %d/%d", map, t9TapIndex + 1, (int)strlen(map));
+            u8g2.drawStr(1, 62, bar);
         } else {
-            snprintf(bar, sizeof(bar), "? [%s]", t9predict.getDigits());
+            const char* hint = (t9InputMode == MODE_T9)  ? "ALT:ABC 2-9:T9 0:sp" :
+                               (t9InputMode == MODE_ABC) ? "ALT:123 0-9:tap" :
+                                                           "ALT:T9 0-9:digits";
+            u8g2.drawStr(1, 62, hint);
         }
-        u8g2.drawStr(1, 62, bar);
-    } else if (t9InputMode == MODE_T9 && t9TapKey == '1') {
-        // T9 mode key 1 symbol cycling
-        const char* map = multiTapMap[1];
-        char bar[32];
-        snprintf(bar, sizeof(bar), "[%s] %d/%d", map, t9TapIndex + 1, (int)strlen(map));
-        u8g2.drawStr(1, 62, bar);
-    } else if (t9InputMode == MODE_ABC && t9TapKey != '\0') {
-        const char* map = multiTapMap[t9TapKey - '0'];
-        char bar[32];
-        snprintf(bar, sizeof(bar), "[%s] %d/%d", map, t9TapIndex + 1, (int)strlen(map));
-        u8g2.drawStr(1, 62, bar);
-    } else {
-        // Mode hint
-        const char* hint = (t9InputMode == MODE_T9)  ? "ALT:ABC 2-9:T9 0:sp" :
-                           (t9InputMode == MODE_ABC) ? "ALT:123 0-9:tap" :
-                                                       "ALT:T9 0-9:digits";
-        u8g2.drawStr(1, 62, hint);
+    }
+
+    if (t9SavePromptActive) {
+        renderT9SavePrompt();
     }
 }

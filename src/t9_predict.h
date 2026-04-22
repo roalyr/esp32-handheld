@@ -2,8 +2,8 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/t9_predict.h
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TACTICAL_TODO TASK_2
-// LOG_REF: 2026-04-01
+// TRUTH_LINK: TACTICAL_TODO TASK_1
+// LOG_REF: 2026-04-22
 // Description: T9 predictive text lookup engine.
 //              Maps digit sequences to dictionary words via binary search.
 //              Prefix matching for incremental word suggestion.
@@ -47,6 +47,12 @@ public:
     int getSelectedPrefixIndex() const;
     void nextPrefixCandidate();
     void prevPrefixCandidate();
+    int getPrefixCandidateCountForLength(int targetLen) const;
+    const char* getPrefixCandidateForLength(int targetLen, int index) const;
+    void nextPrefixCandidateForLength(int targetLen);
+    void prevPrefixCandidateForLength(int targetLen);
+    int getSingleKeyLetterCount(char digit) const;
+    const char* getSingleKeyLetter(char digit, int index) const;
 
 private:
     char digits[16];        // Current digit sequence (null-terminated)

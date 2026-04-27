@@ -1,15 +1,20 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/apps/settings.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TACTICAL_TODO VERIFICATION
+// TRUTH_LINK: TACTICAL_TODO TASK_1
 // LOG_REF: 2026-04-22
-// Description: Settings app — brightness, sleep toggle, key tester, T9 editor, SD card info.
+// Description: Settings app — brightness, sleep toggle, key tester, T9 editor launcher, SD card info.
 
 #include "settings.h"
+#include "t9_editor.h"
+#include "../app_control.h"
+#include "../app_transfer.h"
 #include "../gui.h"
 #include "../config.h"
 #include "../clock.h"
 #include "../hal.h"
+
+extern T9EditorApp appT9Editor;
 
 // External sleep control (defined in main.cpp)
 extern bool sleepEnabled;
@@ -262,8 +267,15 @@ void SettingsApp::handleInput(char key) {
                 lastPressedKey = ' ';
                 for (int i = 0; i < HISTORY_SIZE; i++) keyHistory[i] = ' ';
             } else if (selectedIndex == SETTING_T9_EDITOR) {
-                inT9Editor = true;
-                t9EditorReset();
+                appTransferAction = ACTION_CREATE_FILE;
+                appTransferPath = "";
+                appTransferString = "";
+                appTransferLabel = "T9 EDITOR";
+                appTransferBool = false;
+                appTransferEditorMode = APP_TRANSFER_EDITOR_READ_WRITE;
+                appTransferSourceKind = APP_TRANSFER_SOURCE_BUFFER;
+                appTransferCaller = this;
+                switchApp(&appT9Editor);
             } else if (selectedIndex == SETTING_LCD_TEST) {
                 inLcdTest = true;
                 lcdTestStep = 0;

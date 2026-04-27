@@ -2,8 +2,8 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/main.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TACTICAL_TODO TASK_4, TASK_7
-// LOG_REF: 2026-03-28
+// TRUTH_LINK: TACTICAL_TODO TASK_1
+// LOG_REF: 2026-04-22
 //
 
 #include <Arduino.h>
@@ -13,22 +13,42 @@
 #include "gui.h"
 #include "lua_vm.h"
 #include "lua_scripts.h"
+#include "app_transfer.h"
 #include <esp_sleep.h>
 
 // App Modules (only Settings remains as CPP app)
 #include "apps/settings.h"
+#include "apps/t9_editor.h"
 
 // --------------------------------------------------------------------------
 // SYSTEM STATE
 // --------------------------------------------------------------------------
 
 SettingsApp appSettings;
+T9EditorApp appT9Editor;
 
 // System mode: two states only
 enum SystemMode { MODE_LUA, MODE_SETTINGS };
 static SystemMode currentMode = MODE_LUA;
 static bool luaError = false;
 static String luaErrorMsg = "";
+static App* activeSettingsApp = nullptr;
+
+void switchApp(App* newApp) {
+    if (newApp == nullptr || newApp == activeSettingsApp) {
+        return;
+    }
+
+    App* previousApp = activeSettingsApp;
+    if (previousApp != nullptr && previousApp != &appSettings) {
+        previousApp->stop();
+    }
+
+    activeSettingsApp = newApp;
+    if (newApp != &appSettings || previousApp == nullptr) {
+        newApp->start();
+    }
+}
 
 // Timing Control
 unsigned long lastFrameTime = 0;
@@ -236,14 +256,18 @@ void loop() {
             
             if (currentMode == MODE_LUA) {
                 currentMode = MODE_SETTINGS;
-                appSettings.start();
+                activeSettingsApp = nullptr;
+                switchApp(&appSettings);
             } else if (currentMode == MODE_SETTINGS) {
-                if (appSettings.isInSubmenu()) {
+                if (activeSettingsApp != nullptr && activeSettingsApp != &appSettings) {
+                    activeSettingsApp->handleInput(KEY_ESC);
+                } else if (appSettings.isInSubmenu()) {
                     // Let settings handle ESC internally (e.g. exit key tester)
                     appSettings.handleInput(KEY_ESC);
                 } else {
                     appSettings.stop();
                     currentMode = MODE_LUA;
+                    activeSettingsApp = nullptr;
                 }
             }
             // ESC consumed — skip to render
@@ -289,6 +313,7 @@ void loop() {
                     }
                 }
             } else if (currentMode == MODE_SETTINGS) {
+                App* settingsApp = (activeSettingsApp != nullptr) ? activeSettingsApp : static_cast<App*>(&appSettings);
                 // Forward non-ESC input to settings (including repeats)
                 for (int i = 0; i < activeKeyCount; i++) {
                     char key = activeKeys[i];
@@ -296,11 +321,27 @@ void loop() {
                         bool shouldFire = isJustPressed(key) || isRepeating(key) || isLongPressed(key);
                         if (shouldFire) {
                             lastActivityTime = now;
-                            appSettings.handleInput(key);
+                            settingsApp->handleInput(key);
                         }
                     }
                 }
-                appSettings.update();
+
+                settingsApp->update();
+                if (settingsApp == &appT9Editor && appT9Editor.exitRequested) {
+                    appT9Editor.exitRequested = false;
+                    App* returnApp = (appTransferCaller != nullptr) ? appTransferCaller : static_cast<App*>(&appSettings);
+                    appTransferCaller = nullptr;
+                    if (returnApp == &appSettings) {
+                        appTransferAction = ACTION_NONE;
+                        appTransferBool = false;
+                        appTransferString = "";
+                        appTransferPath = "";
+                        appTransferEditorMode = APP_TRANSFER_EDITOR_DEFAULT;
+                        appTransferSourceKind = APP_TRANSFER_SOURCE_DEFAULT;
+                        appTransferLabel = "";
+                    }
+                    switchApp(returnApp);
+                }
             }
         }
         
@@ -318,7 +359,11 @@ void loop() {
             }
         } else if (currentMode == MODE_SETTINGS) {
             u8g2.clearBuffer();
-            appSettings.render();
+            if (activeSettingsApp != nullptr) {
+                activeSettingsApp->render();
+            } else {
+                appSettings.render();
+            }
             u8g2.sendBuffer();
         }
     }

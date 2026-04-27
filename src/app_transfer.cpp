@@ -1,5 +1,9 @@
-// [Revision: v1.0] [Path: src/app_transfer.cpp] [Date: 2025-12-10]
-// Description: Define globals used for cross-app transfers.
+// PROJECT: ESP32-S2-Mini handheld terminal
+// MODULE: src/app_transfer.cpp
+// STATUS: [Level 2 - Implementation]
+// TRUTH_LINK: TACTICAL_TODO TASK_2
+// LOG_REF: 2026-04-27
+// Description: Global transfer state used for editor/viewer and prompt workflows.
 
 #include "app_transfer.h"
 
@@ -8,3 +12,6 @@ int appTransferAction = ACTION_NONE;
 bool appTransferBool = false;
 String appTransferString = "";
 String appTransferPath = "";
+String appTransferLabel = "";
+int appTransferEditorMode = APP_TRANSFER_EDITOR_DEFAULT;
+int appTransferSourceKind = APP_TRANSFER_SOURCE_DEFAULT;

@@ -1,65 +1,46 @@
-## CURRENT GOAL: T9 Editor Coding-Comfort Upgrade v1.3
-- TARGET_FILE: src/apps/settings.cpp
-- TRUTH_RELIANCE: TRUTH_HARDWARE.md Section 0 (ESP32-S2-Mini platform limits), Section 2 (4x5 key matrix and special keys including ESC/TAB/ENTER/arrows); TRUTH_FLASHING.md Quick Reference + Flashing Procedure (build/flash verification flow)
+## CURRENT GOAL: Canonical T9 Editor/Viewer Rebase v1.4
+- TARGET_FILE: src/apps/t9_editor.cpp
+- TRUTH_RELIANCE: TRUTH_HARDWARE.md Section 0 (ESP32-S2-Mini memory/display limits), Section 1 (128x64 ST7920 display), Section 2 (4x5 keyboard and special keys); TRUTH_FLASHING.md Quick Reference + Flashing Procedure
 - TECHNICAL_CONSTRAINTS:
   - TRUTH_PROJECT.md is not present in workspace; no additional constraints may be inferred beyond explicit Truth files.
 - ATOMIC_TASKS:
-  - [x] TASK_1: Rework T9 editor input/prediction behavior and coding symbols without scope creep.
+  - [ ] TASK_1: Reactivate the dormant editor app as the single live editor/viewer owner.
     Required signatures:
-    - src/apps/settings.h:
-      - Add enum T9ViewMode { VIEW_FULL, VIEW_FULL_LINENO, VIEW_MIN_LINENO, VIEW_MIN };
-      - Add member: T9ViewMode t9ViewMode;
-      - Add member: bool t9SavePromptActive;
-      - Add member: int t9SavePromptSelection;  // 0=No, 1=Yes
-      - Add methods: void t9HandleSavePromptInput(char key); void renderT9SavePrompt();
-    - src/t9_predict.h:
-      - Add method: int getPrefixCandidateCountForLength(int targetLen) const;
-      - Add method: const char* getPrefixCandidateForLength(int targetLen, int index) const;
-      - Add method: void nextPrefixCandidateForLength(int targetLen);
-      - Add method: void prevPrefixCandidateForLength(int targetLen);
-      - Add method: int getSingleKeyLetterCount(char digit) const;
-      - Add method: const char* getSingleKeyLetter(char digit, int index) const;
-    Required behavior:
-    - TAB must no longer insert newline. TAB cycles editor view modes in this exact order:
-      - VIEW_FULL: header + footer
-      - VIEW_FULL_LINENO: header + footer + line numbers
-      - VIEW_MIN_LINENO: no header/footer + line numbers
-      - VIEW_MIN: no header/footer + no line numbers
-    - In MODE_T9 when current pending input is exactly one keypress (digit 2-9), UP/DOWN cycling order must be:
-      1) individual letters on that key in keypad order (2=abc, 3=def, ..., 9=wxyz),
-      2) then dictionary suggestions.
-    - Prefix suggestion priority must prefer words whose visible output length equals current digit count; only then allow longer completions.
-    - Key 1 in editor must include Lua coding symbols (not only punctuation). Minimum symbol pool:
-      - .,?!1()[]{}<>:;"'`=+-*/%#_\\|&$
-    - Bracket completion: committing left bracket from any input mode inserts matching pair and keeps cursor between, for (), [], {}, <>.
-
-  - [x] TASK_2: Add authoring-assist content and safe-exit UX contract for T9 editor.
-    Required signatures:
+    - platformio.ini:
+      - Re-enable src/apps/t9_editor.cpp, src/apps/yes_no_prompt.cpp, and src/app_transfer.cpp in build_src_filter.
+      - Keep src/apps/file_browser.cpp excluded in this milestone.
+    - src/main.cpp:
+      - Add concrete T9EditorApp instance ownership.
+      - Implement switchApp(App* newApp).
+      - Route MODE_SETTINGS input, update, and render through the active app pointer.
     - src/apps/settings.cpp:
-      - ESC while in T9 editor opens modal save prompt stub and blocks editor ESC handling until answered.
-      - Prompt choices: No / Yes.
-      - On No: close prompt and exit editor.
-      - On Yes: close prompt, run save stub (no SD write yet), then exit editor.
-    - data_backup/t9_lua_typing_sample.lua:
-      - Create Lua typing reference sample containing:
-        - table literals
-        - local functions
-        - if/elseif/else
-        - for and while loops
-        - brackets/parens/braces
-        - string quoting and escapes
-        - comments and common operators
+      - Launch T9EditorApp via app-transfer state instead of entering the inline in-settings editor path.
     Required behavior:
-    - While save prompt is active, only LEFT/RIGHT/UP/DOWN/TAB/ENTER/ESC for prompt navigation are accepted; regular text entry and normal editor ESC path are blocked.
-    - Save path is explicit stub only (for now): log intent and return success state without filesystem writes.
+    - Entering T9 Editor from Settings launches T9EditorApp in scratch read-write mode.
+    - Returning from T9EditorApp lands back in Settings cleanly.
+    - The inline Settings-based editor is no longer the active edit path.
 
-  - [ ] VERIFICATION: Build + interaction checklist
+  - [ ] TASK_2: Rebase the canonical editor app onto the current T9 UX and add the scalable viewer contract.
+    Required signatures:
+    - src/apps/t9_editor.h:
+      - Add explicit read-write vs read-only open state.
+      - Add a document/source seam that supports in-memory buffers now and future paged providers.
+      - Add four TAB view modes matching the live editor UX.
+    - src/app_transfer.h:
+      - Carry editor/viewer open mode, payload buffer, and label/path metadata.
+    - src/apps/t9_editor.cpp:
+      - Reuse the predictive/editor behavior currently implemented in src/apps/settings.cpp and src/t9_predict.cpp.
+    Required behavior:
+    - Tap 0 inserts space; hold 0 inserts a single literal 0.
+    - Key 1 symbol cycling is reordered so common coding symbols appear earlier.
+    - TAB cycles VIEW_FULL -> VIEW_FULL_LINENO -> VIEW_MIN_LINENO -> VIEW_MIN.
+    - Read-only mode preserves cursor movement, TAB cycling, and scrolling but blocks text mutation.
+
+  - [ ] VERIFICATION: Build and interaction checklist
     Success criteria/tests to run:
     - pio run -e lolin_s2_mini completes with zero errors.
-    - T9 editor TAB cycles exactly 4 visual modes and never inserts newline.
-    - In T9 mode, single digit 6 cycles m -> n -> o before any dictionary candidate.
-    - Prefix candidate ordering for 2-digit entry favors 2-char outputs before longer words.
-    - Key 1 cycles through Lua coding symbol pool and renders correctly.
-    - Bracket completion inserts pairs and leaves cursor centered between brackets.
-    - ESC opens blocking save prompt; editor cannot be exited until No/Yes chosen.
-    - Choosing Yes executes save stub path (no SD I/O) and exits cleanly.
+    - Launching T9 Editor from Settings opens T9EditorApp and returns cleanly.
+    - A buffer exceeding 64 wrapped or logical lines scrolls correctly past line 64.
+    - Line-number gutter widens for 2-digit and 3-digit counts with no overdraw.
+    - Read-write mode preserves the current 0/1/TAB behavior contract.
+    - Read-only mode blocks edits while preserving navigation and view cycling.

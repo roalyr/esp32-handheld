@@ -4,7 +4,7 @@
 - TECHNICAL_CONSTRAINTS:
   - TRUTH_PROJECT.md is not present in workspace; no additional constraints may be inferred beyond explicit Truth files.
 - ATOMIC_TASKS:
-  - [ ] TASK_1: Reactivate the dormant editor app as the single live editor/viewer owner.
+  - [x] TASK_1: Reactivate the dormant editor app as the single live editor/viewer owner.
     Required signatures:
     - platformio.ini:
       - Re-enable src/apps/t9_editor.cpp, src/apps/yes_no_prompt.cpp, and src/app_transfer.cpp in build_src_filter.
@@ -20,7 +20,7 @@
     - Returning from T9EditorApp lands back in Settings cleanly.
     - The inline Settings-based editor is no longer the active edit path.
 
-  - [ ] TASK_2: Rebase the canonical editor app onto the current T9 UX and add the scalable viewer contract.
+  - [x] TASK_2: Rebase the canonical editor app onto the current T9 UX and add the scalable viewer contract.
     Required signatures:
     - src/apps/t9_editor.h:
       - Add explicit read-write vs read-only open state.

@@ -1,13 +1,14 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/lua_vm.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TRUTH_HARDWARE.md Section 0 (4MB Flash), TACTICAL_TODO TASK_1/TASK_2/TASK_3
-// LOG_REF: 2026-03-28
+// TRUTH_LINK: TRUTH_HARDWARE.md Section 0.1, Section 1, Section 3; TACTICAL_TODO TASK_1
+// LOG_REF: 2026-04-28
 
 #include "lua_vm.h"
 #include "hal.h"
 #include "config.h"
 #include "clock.h"
+#include "gui.h"
 #include "t9_engine.h"
 #include <lua.hpp>
 
@@ -29,6 +30,99 @@ static int luaTraceback(lua_State* L) {
         lua_pushliteral(L, "(no error message)");
     }
     return 1;
+}
+
+struct SdSessionGuard {
+    bool active = false;
+
+    bool begin() {
+        active = sdBeginSession();
+        return active;
+    }
+
+    ~SdSessionGuard() {
+        if (active) {
+            sdEndSession();
+        }
+    }
+};
+
+static int pushLuaResultError(lua_State* L, const String& message) {
+    lua_pushnil(L);
+    lua_pushlstring(L, message.c_str(), message.length());
+    return 2;
+}
+
+static String normalizeFsPath(const char* rawPath) {
+    String path = rawPath ? rawPath : "/";
+    if (path.length() == 0) {
+        path = "/";
+    }
+    if (!path.startsWith("/")) {
+        path = "/" + path;
+    }
+    while (path.length() > 1 && path.endsWith("/")) {
+        path.remove(path.length() - 1);
+    }
+    return path;
+}
+
+static String formatFatDate(uint16_t fatDate) {
+    if (fatDate == 0) {
+        return "";
+    }
+
+    const uint16_t year = 1980 + ((fatDate >> 9) & 0x7F);
+    const uint16_t month = (fatDate >> 5) & 0x0F;
+    const uint16_t day = fatDate & 0x1F;
+
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%04u-%02u-%02u", year, month, day);
+    return String(buffer);
+}
+
+static String formatFatTime(uint16_t fatTime) {
+    if (fatTime == 0) {
+        return "";
+    }
+
+    const uint16_t hour = (fatTime >> 11) & 0x1F;
+    const uint16_t minute = (fatTime >> 5) & 0x3F;
+
+    char buffer[8];
+    snprintf(buffer, sizeof(buffer), "%02u:%02u", hour, minute);
+    return String(buffer);
+}
+
+static String formatFatCompactDateTime(uint16_t fatDate, uint16_t fatTime) {
+    if (fatDate == 0) {
+        return "";
+    }
+
+    const uint16_t month = (fatDate >> 5) & 0x0F;
+    const uint16_t day = fatDate & 0x1F;
+    const uint16_t hour = (fatTime >> 11) & 0x1F;
+    const uint16_t minute = (fatTime >> 5) & 0x3F;
+
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%02u-%02u %02u:%02u", month, day, hour, minute);
+    return String(buffer);
+}
+
+static String formatFatFullDateTime(uint16_t fatDate, uint16_t fatTime) {
+    if (fatDate == 0) {
+        return "";
+    }
+
+    const uint16_t year = 1980 + ((fatDate >> 9) & 0x7F);
+    const uint16_t month = (fatDate >> 5) & 0x0F;
+    const uint16_t day = fatDate & 0x1F;
+    const uint16_t hour = (fatTime >> 11) & 0x1F;
+    const uint16_t minute = (fatTime >> 5) & 0x3F;
+
+    char buffer[20];
+    snprintf(buffer, sizeof(buffer), "%04u-%02u-%02u %02u:%02u", year, month, day, hour, minute);
+    return String(buffer);
 }
 
 // --------------------------------------------------------------------------
@@ -112,13 +206,14 @@ static int lua_gfx_text(lua_State* L) {
     return 0;
 }
 
-// gfx.setFont(size) - Set font size (0=small, 1=medium, 2=large)
+// gfx.setFont(size) - Set font size (0=small, 1=medium, 2=large, 3=tiny)
 static int lua_gfx_setFont(lua_State* L) {
     int size = luaL_optinteger(L, 1, 0);
     switch (size) {
         case 0: u8g2.setFont(u8g2_font_5x7_tf); break;
         case 1: u8g2.setFont(u8g2_font_6x10_tf); break;
         case 2: u8g2.setFont(u8g2_font_8x13_tf); break;
+        case 3: u8g2.setFont(u8g2_font_4x6_tf); break;
         default: u8g2.setFont(u8g2_font_5x7_tf); break;
     }
     return 0;
@@ -338,6 +433,186 @@ static void registerSysModule(lua_State* L) {
 }
 
 // --------------------------------------------------------------------------
+// LUA BINDINGS - SD Filesystem Functions
+// --------------------------------------------------------------------------
+
+// fs.list(path) - Return array of {name, path, is_dir, size, modified}
+static int lua_fs_list(lua_State* L) {
+    String path = normalizeFsPath(luaL_optstring(L, 1, "/"));
+    if (!isSDMounted()) {
+        return pushLuaResultError(L, "SD not mounted");
+    }
+
+    SdSessionGuard session;
+    FsFile dir;
+    FsFile entry;
+    if (!session.begin()) {
+        return pushLuaResultError(L, "Failed to open SD session");
+    }
+    if (!dir.open(path.c_str(), O_RDONLY) || !dir.isDir()) {
+        return pushLuaResultError(L, String("Failed to open directory: ") + path);
+    }
+
+    lua_newtable(L);
+    dir.rewind();
+
+    int index = 1;
+    char name[128];
+    while (entry.openNext(&dir, O_RDONLY)) {
+        size_t nameLen = entry.getName(name, sizeof(name));
+        if (nameLen > 0 && strcmp(name, ".") != 0 && strcmp(name, "..") != 0) {
+            lua_newtable(L);
+
+            lua_pushstring(L, name);
+            lua_setfield(L, -2, "name");
+
+            String childPath = path;
+            if (childPath != "/") {
+                childPath += "/";
+            }
+            childPath += name;
+            lua_pushlstring(L, childPath.c_str(), childPath.length());
+            lua_setfield(L, -2, "path");
+
+            bool isDir = entry.isDir();
+            lua_pushboolean(L, isDir);
+            lua_setfield(L, -2, "is_dir");
+
+            uint64_t entrySize = isDir ? 0 : entry.size();
+            lua_pushinteger(L, static_cast<lua_Integer>(entrySize));
+            lua_setfield(L, -2, "size");
+
+            uint16_t fatDate = 0;
+            uint16_t fatTime = 0;
+            const bool hasModified = entry.getModifyDateTime(&fatDate, &fatTime);
+            const String modified = hasModified ? formatFatDate(fatDate) : "";
+            const String modifiedTime = hasModified ? formatFatTime(fatTime) : "";
+            const String modifiedShort = hasModified ? formatFatCompactDateTime(fatDate, fatTime) : "";
+            const String modifiedFull = hasModified ? formatFatFullDateTime(fatDate, fatTime) : "";
+            lua_pushlstring(L, modified.c_str(), modified.length());
+            lua_setfield(L, -2, "modified");
+
+            lua_pushlstring(L, modifiedTime.c_str(), modifiedTime.length());
+            lua_setfield(L, -2, "modified_time");
+
+            lua_pushlstring(L, modifiedShort.c_str(), modifiedShort.length());
+            lua_setfield(L, -2, "modified_short");
+
+            lua_pushlstring(L, modifiedFull.c_str(), modifiedFull.length());
+            lua_setfield(L, -2, "modified_full");
+
+            lua_rawseti(L, -2, index++);
+        }
+        entry.close();
+    }
+
+    if (dir.getError()) {
+        lua_pop(L, 1);
+        return pushLuaResultError(L, String("Directory read failed: ") + path);
+    }
+    return 1;
+}
+
+// fs.read(path) - Read an entire text file into a Lua string
+static int lua_fs_read(lua_State* L) {
+    String path = normalizeFsPath(luaL_checkstring(L, 1));
+    if (!isSDMounted()) {
+        return pushLuaResultError(L, "SD not mounted");
+    }
+
+    SdSessionGuard session;
+    FsFile file;
+    if (!session.begin()) {
+        return pushLuaResultError(L, "Failed to open SD session");
+    }
+    if (!file.open(path.c_str(), O_RDONLY)) {
+        return pushLuaResultError(L, String("Failed to open file: ") + path);
+    }
+    if (file.isDir()) {
+        return pushLuaResultError(L, String("Path is a directory: ") + path);
+    }
+
+    uint64_t fileSize = file.size();
+    if (fileSize > 262144ULL) {
+        return pushLuaResultError(L, String("File too large for Lua read: ") + path);
+    }
+
+    String content;
+    if (fileSize > 0 && !content.reserve(static_cast<unsigned int>(fileSize))) {
+        return pushLuaResultError(L, String("Not enough memory to read file: ") + path);
+    }
+
+    char buffer[129];
+    while (true) {
+        int bytesRead = file.read(buffer, sizeof(buffer) - 1);
+        if (bytesRead < 0) {
+            return pushLuaResultError(L, String("Failed to read file: ") + path);
+        }
+        if (bytesRead == 0) {
+            break;
+        }
+        buffer[bytesRead] = '\0';
+        if (!content.concat(buffer)) {
+            return pushLuaResultError(L, String("Failed to append file data: ") + path);
+        }
+    }
+
+    lua_pushlstring(L, content.c_str(), content.length());
+    return 1;
+}
+
+static void registerFsModule(lua_State* L) {
+    static const luaL_Reg fs_funcs[] = {
+        {"list", lua_fs_list},
+        {"read", lua_fs_read},
+        {NULL, NULL}
+    };
+
+    luaL_newlib(L, fs_funcs);
+    lua_setglobal(L, "fs");
+}
+
+// --------------------------------------------------------------------------
+// LUA BINDINGS - UI Helpers
+// --------------------------------------------------------------------------
+
+// ui.header(title, rightText) - Draw standard app header
+static int lua_ui_header(lua_State* L) {
+    const char* title = luaL_checkstring(L, 1);
+    const char* rightText = lua_isnoneornil(L, 2) ? nullptr : luaL_checkstring(L, 2);
+    GUI::drawHeader(title, rightText);
+    return 0;
+}
+
+// ui.footer(leftHint, rightHint) - Draw standard footer hints
+static int lua_ui_footer(lua_State* L) {
+    const char* leftHint = luaL_checkstring(L, 1);
+    const char* rightHint = lua_isnoneornil(L, 2) ? nullptr : luaL_checkstring(L, 2);
+    GUI::drawFooterHints(leftHint, rightHint);
+    return 0;
+}
+
+// ui.confirm(message, yesSelected) - Draw shared yes/no confirmation dialog
+static int lua_ui_confirm(lua_State* L) {
+    const char* message = luaL_checkstring(L, 1);
+    const bool yesSelected = lua_toboolean(L, 2);
+    GUI::drawYesNoDialog(message, yesSelected);
+    return 0;
+}
+
+static void registerUiModule(lua_State* L) {
+    static const luaL_Reg ui_funcs[] = {
+        {"header", lua_ui_header},
+        {"footer", lua_ui_footer},
+        {"confirm", lua_ui_confirm},
+        {NULL, NULL}
+    };
+
+    luaL_newlib(L, ui_funcs);
+    lua_setglobal(L, "ui");
+}
+
+// --------------------------------------------------------------------------
 // LUA BINDINGS - T9 Engine Functions
 // --------------------------------------------------------------------------
 
@@ -485,6 +760,8 @@ bool init() {
     registerGfxModule(L);
     registerInputModule(L);
     registerSysModule(L);
+    registerFsModule(L);
+    registerUiModule(L);
     registerT9Module(L);
     
     lastError = "";

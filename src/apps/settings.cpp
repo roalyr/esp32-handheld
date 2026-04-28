@@ -142,6 +142,8 @@ SettingsApp::SettingsApp() {
     lcdTestStep = 0;
     inSdTest = false;
     sdTestRan = false;
+    sdRemountPending = false;
+    sdRemountDeadline = 0;
     sdTestLineCount = 0;
     t9EditorReset();
 }
@@ -157,6 +159,8 @@ void SettingsApp::start() {
     lcdTestStep = 0;
     inSdTest = false;
     sdTestRan = false;
+    sdRemountPending = false;
+    sdRemountDeadline = 0;
     selectedIndex = 0;
 }
 
@@ -168,6 +172,7 @@ void SettingsApp::stop() {
     inT9Editor = false;
     inLcdTest = false;
     inSdTest = false;
+    sdRemountPending = false;
 }
 
 bool SettingsApp::isInSubmenu() {
@@ -175,6 +180,12 @@ bool SettingsApp::isInSubmenu() {
 }
 
 void SettingsApp::update() {
+    if (sdRemountPending && millis() >= sdRemountDeadline) {
+        bool mounted = mountSD();
+        GUI::showToast(mounted ? "SD card mounted" : "SD card failed", 1400);
+        sdRemountPending = false;
+    }
+
     // Auto-commit multi-tap after timeout (ABC mode or T9 fallback)
     if (inT9Editor && !t9SavePromptActive && (t9InputMode == MODE_ABC || t9Fallback) && t9TapKey != '\0') {
         if (millis() - t9TapTime > MULTITAP_TIMEOUT) {
@@ -213,6 +224,10 @@ void SettingsApp::addToHistory(char c) {
 }
 
 void SettingsApp::handleInput(char key) {
+    if (sdRemountPending) {
+        return;
+    }
+
     if (inKeyTester) {
         if (key == KEY_ESC) {
             inKeyTester = false;
@@ -266,6 +281,11 @@ void SettingsApp::handleInput(char key) {
                 inKeyTester = true;
                 lastPressedKey = ' ';
                 for (int i = 0; i < HISTORY_SIZE; i++) keyHistory[i] = ' ';
+            } else if (selectedIndex == SETTING_SD_REMOUNT) {
+                unmountSD();
+                GUI::showToast("Checking SDcard", 450);
+                sdRemountPending = true;
+                sdRemountDeadline = millis() + 450;
             } else if (selectedIndex == SETTING_T9_EDITOR) {
                 appTransferAction = ACTION_CREATE_FILE;
                 appTransferPath = "";
@@ -415,6 +435,9 @@ void SettingsApp::renderSettingsList() {
             else
                 snprintf(buf, sizeof(buf), "Sleep: %s", tempSleepEnabled ? "ON" : "OFF");
             break;
+        case SETTING_SD_REMOUNT:
+            snprintf(buf, sizeof(buf), "(Re)mount SD card");
+            break;
         case SETTING_KEY_TESTER:
             snprintf(buf, sizeof(buf), "Key Tester...");
             break;
@@ -496,6 +519,8 @@ void SettingsApp::render() {
     } else {
         renderSettingsList();
     }
+
+    GUI::updateToast();
 }
 
 // --------------------------------------------------------------------------

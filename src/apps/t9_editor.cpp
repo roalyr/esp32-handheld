@@ -955,24 +955,7 @@ void T9EditorApp::renderFooter() const {
 }
 
 void T9EditorApp::renderSavePrompt() {
-    u8g2.drawBox(16, 18, 96, 28);
-    u8g2.setDrawColor(0);
-    u8g2.drawStr(22, 30, "Save buffer?");
-
-    const bool noSel = (savePromptSelection == 0);
-    if (noSel) {
-        u8g2.drawBox(24, 34, 26, 10);
-        u8g2.setDrawColor(1);
-        u8g2.drawStr(29, 42, "No");
-        u8g2.setDrawColor(0);
-        u8g2.drawStr(68, 42, "Yes");
-    } else {
-        u8g2.drawStr(29, 42, "No");
-        u8g2.drawBox(62, 34, 30, 10);
-        u8g2.setDrawColor(1);
-        u8g2.drawStr(68, 42, "Yes");
-    }
-    u8g2.setDrawColor(1);
+    GUI::drawYesNoDialog("Save buffer?", savePromptSelection == 1);
 }
 
 void T9EditorApp::render() {

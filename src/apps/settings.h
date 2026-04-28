@@ -19,6 +19,7 @@ class SettingsApp : public App {
         SETTING_BRIGHTNESS = 0,
         SETTING_CONTRAST,
         SETTING_SLEEP,
+      SETTING_SD_REMOUNT,
         SETTING_KEY_TESTER,
         SETTING_T9_EDITOR,
         SETTING_LCD_TEST,
@@ -34,6 +35,8 @@ class SettingsApp : public App {
     int lcdTestStep;       // Current test pattern (0-based)
     bool inSdTest;
     bool sdTestRan;        // True after test has executed
+    bool sdRemountPending;
+    unsigned long sdRemountDeadline;
     
     // Editable values
     int tempBrightness;

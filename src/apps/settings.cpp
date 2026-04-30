@@ -56,6 +56,8 @@ static char getMatchingBracket(char left) {
         case '[': return ']';
         case '{': return '}';
         case '<': return '>';
+        case '"': return '"';
+        case '\'': return '\'';
         default:  return '\0';
     }
 }
@@ -1036,18 +1038,22 @@ void SettingsApp::t9MoveCursorVertically(int dir) {
 void SettingsApp::t9HandleSavePromptInput(char key) {
     if (!t9SavePromptActive) return;
 
-    if (key == KEY_LEFT || key == KEY_UP || key == KEY_ESC) {
+    if (key == KEY_ESC) {
         t9SavePromptSelection = 0;
         return;
     }
-    if (key == KEY_RIGHT || key == KEY_DOWN || key == KEY_TAB) {
-        t9SavePromptSelection = 1;
+
+    if (key == KEY_LEFT || key == KEY_RIGHT ||
+        key == KEY_UP || key == KEY_DOWN ||
+        key == KEY_TAB) {
+        t9SavePromptSelection = (t9SavePromptSelection == 0) ? 1 : 0;
         return;
     }
+
     if (key == KEY_ENTER) {
         bool saveSelected = (t9SavePromptSelection == 1);
         if (saveSelected) {
-            Serial.println("[T9] Save stub: requested, no filesystem write performed");
+            Serial.println("[SettingsT9] Save requested, but inline settings editor has no file-save caller");
         }
         t9SavePromptActive = false;
         inT9Editor = false;

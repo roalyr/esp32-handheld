@@ -2,7 +2,7 @@
 // MODULE: src/apps/t9_editor.cpp
 // STATUS: [Level 2 - Implementation]
 // TRUTH_LINK: TACTICAL_TODO TASK_2
-// LOG_REF: 2026-04-27
+// LOG_REF: 2026-04-30
 // Description: Canonical T9 editor/viewer app with predictive input, view cycling, and RO/RW modes.
 
 #include "t9_editor.h"
@@ -28,6 +28,8 @@ static char getMatchingBracket(char left) {
         case '[': return ']';
         case '{': return '}';
         case '<': return '>';
+        case '"': return '"';
+        case '\'': return '\'';
         default:  return '\0';
     }
 }
@@ -174,6 +176,10 @@ void T9EditorApp::start() {
             documentLabel = "T9 EDITOR";
         }
     }
+    Serial.printf("[T9Editor] Open mode: %s path=%s action=%d\n",
+                  isReadOnly() ? "RO" : "RW",
+                  documentPath.length() > 0 ? documentPath.c_str() : "(buffer)",
+                  appTransferAction);
     resetEditorSession();
     recalculateLayout();
 }
@@ -263,10 +269,13 @@ int T9EditorApp::getTextLeft(int logicalLineCount) const {
 
 void T9EditorApp::requestExit(bool saveRequested) {
     if (saveRequested) {
-        Serial.println("[T9] Save stub: requested, no filesystem write performed");
+        Serial.printf("[T9Editor] Save requested; handing off %u bytes for %s\n",
+                      static_cast<unsigned>(documentBuffer.length()),
+                      documentPath.length() > 0 ? documentPath.c_str() : "(buffer)");
     }
     appTransferString = documentBuffer;
     appTransferBool = saveRequested;
+    appTransferResultReady = true;
     exitRequested = true;
     savePromptActive = false;
 }
@@ -456,14 +465,18 @@ void T9EditorApp::moveCursorVertically(int dir) {
 }
 
 void T9EditorApp::handleSavePromptInput(char key) {
-    if (key == KEY_LEFT || key == KEY_UP || key == KEY_ESC) {
+    if (key == KEY_ESC) {
         savePromptSelection = 0;
         return;
     }
-    if (key == KEY_RIGHT || key == KEY_DOWN || key == KEY_TAB) {
-        savePromptSelection = 1;
+
+    if (key == KEY_LEFT || key == KEY_RIGHT ||
+        key == KEY_UP || key == KEY_DOWN ||
+        key == KEY_TAB) {
+        savePromptSelection = (savePromptSelection == 0) ? 1 : 0;
         return;
     }
+
     if (key == KEY_ENTER) {
         requestExit(savePromptSelection == 1);
     }
@@ -882,7 +895,7 @@ void T9EditorApp::renderHeader() {
     if (isReadOnly()) {
         snprintf(rightText, sizeof(rightText), "RO %s%s", shiftStr, modeStr);
     } else {
-        snprintf(rightText, sizeof(rightText), "%s%s", shiftStr, modeStr);
+        snprintf(rightText, sizeof(rightText), "RW %s%s", shiftStr, modeStr);
     }
 
     String title = documentLabel.length() > 0 ? documentLabel : String("T9 EDITOR");

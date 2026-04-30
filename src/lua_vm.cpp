@@ -2,7 +2,7 @@
 // MODULE: src/lua_vm.cpp
 // STATUS: [Level 2 - Implementation]
 // TRUTH_LINK: TRUTH_HARDWARE.md Section 0.1, Section 1, Section 3; TACTICAL_TODO TASK_1
-// LOG_REF: 2026-04-28
+// LOG_REF: 2026-04-30
 
 #include "lua_vm.h"
 #include "hal.h"
@@ -58,6 +58,26 @@ static int pushLuaResultError(lua_State* L, const String& message) {
     return 2;
 }
 
+static void clearTransferPayload() {
+    appTransferAction = ACTION_NONE;
+    appTransferBool = false;
+    appTransferResultReady = false;
+    appTransferString = "";
+    appTransferPath = "";
+    appTransferLabel = "";
+    appTransferEditorMode = APP_TRANSFER_EDITOR_DEFAULT;
+    appTransferSourceKind = APP_TRANSFER_SOURCE_DEFAULT;
+    appTransferCaller = nullptr;
+}
+
+static bool hasPendingLuaEditorResult() {
+    return appTransferResultReady &&
+           appTransferAction == ACTION_EDIT_FILE &&
+           appTransferEditorMode == APP_TRANSFER_EDITOR_READ_WRITE &&
+           appTransferSourceKind == APP_TRANSFER_SOURCE_BUFFER &&
+           appTransferPath.length() > 0;
+}
+
 static bool readSdTextFile(const String& path, String& content, String& error) {
     if (!isSDMounted()) {
         error = "SD not mounted";
@@ -109,6 +129,56 @@ static bool readSdTextFile(const String& path, String& content, String& error) {
     }
 
     error = "";
+    return true;
+}
+
+static bool writeSdTextFile(const String& path, const String& content, String& error) {
+    if (!isSDMounted()) {
+        error = "SD not mounted";
+        Serial.println("[LuaVM] Save failed: SD not mounted");
+        return false;
+    }
+
+    SdSessionGuard session;
+    FsFile file;
+    if (!session.begin()) {
+        error = "Failed to open SD session";
+        Serial.println("[LuaVM] Save failed: could not open SD session");
+        return false;
+    }
+    if (!file.open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC)) {
+        error = String("Failed to open file for write: ") + path +
+                String(" (code=0x") + String(sdFat.sdErrorCode(), HEX) +
+                String(", data=0x") + String(sdFat.sdErrorData(), HEX) + ")";
+        Serial.println(String("[LuaVM] ") + error);
+        return false;
+    }
+    if (file.isDir()) {
+        error = String("Path is a directory: ") + path;
+        Serial.println(String("[LuaVM] ") + error);
+        return false;
+    }
+
+    const char* buffer = content.c_str();
+    const size_t contentLength = content.length();
+    const size_t bytesWritten = file.write(reinterpret_cast<const uint8_t*>(buffer), contentLength);
+    if (bytesWritten != contentLength) {
+        error = String("Failed to write file: ") + path;
+        Serial.println(String("[LuaVM] ") + error);
+        return false;
+    }
+    if (!file.sync()) {
+        error = String("Failed to sync file: ") + path +
+                String(" (code=0x") + String(sdFat.sdErrorCode(), HEX) +
+                String(", data=0x") + String(sdFat.sdErrorData(), HEX) + ")";
+        Serial.println(String("[LuaVM] ") + error);
+        return false;
+    }
+
+    error = "";
+    Serial.printf("[LuaVM] Saved %u bytes to %s\n",
+                  static_cast<unsigned>(contentLength),
+                  path.c_str());
     return true;
 }
 
@@ -585,10 +655,26 @@ static int lua_fs_read(lua_State* L) {
     return 1;
 }
 
+// fs.write(path, content) - Write an entire text file to SD
+static int lua_fs_write(lua_State* L) {
+    String path = normalizeFsPath(luaL_checkstring(L, 1));
+    size_t contentLength = 0;
+    const char* content = luaL_checklstring(L, 2, &contentLength);
+
+    String error;
+    if (!writeSdTextFile(path, String(content).substring(0, contentLength), error)) {
+        return pushLuaResultError(L, error);
+    }
+
+    lua_pushboolean(L, true);
+    return 1;
+}
+
 static void registerFsModule(lua_State* L) {
     static const luaL_Reg fs_funcs[] = {
         {"list", lua_fs_list},
         {"read", lua_fs_read},
+        {"write", lua_fs_write},
         {NULL, NULL}
     };
 
@@ -644,6 +730,7 @@ static int lua_ui_viewFile(lua_State* L) {
 
     appTransferAction = ACTION_VIEW_FILE;
     appTransferBool = false;
+    appTransferResultReady = false;
     appTransferString = content;
     appTransferPath = path;
     appTransferLabel = label ? String(label) : path;
@@ -657,6 +744,64 @@ static int lua_ui_viewFile(lua_State* L) {
     return 1;
 }
 
+static int lua_ui_editFile(lua_State* L) {
+    String path = normalizeFsPath(luaL_checkstring(L, 1));
+    const char* label = lua_isnoneornil(L, 2) ? nullptr : luaL_checkstring(L, 2);
+
+    String content;
+    String error;
+    if (!readSdTextFile(path, content, error)) {
+        return pushLuaResultError(L, error);
+    }
+
+    appTransferAction = ACTION_EDIT_FILE;
+    appTransferBool = false;
+    appTransferResultReady = false;
+    appTransferString = content;
+    appTransferPath = path;
+    appTransferLabel = label ? String(label) : path;
+    appTransferEditorMode = APP_TRANSFER_EDITOR_READ_WRITE;
+    appTransferSourceKind = APP_TRANSFER_SOURCE_BUFFER;
+    appTransferCaller = nullptr;
+
+    launchLuaOwnedApp(&appT9Editor);
+
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+static int lua_ui_takeEditorResult(lua_State* L) {
+    if (!hasPendingLuaEditorResult()) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    Serial.printf("[LuaVM] Delivering editor result: save=%d bytes=%u path=%s\n",
+                  appTransferBool ? 1 : 0,
+                  static_cast<unsigned>(appTransferString.length()),
+                  appTransferPath.c_str());
+
+    lua_newtable(L);
+
+    lua_pushliteral(L, "edit");
+    lua_setfield(L, -2, "action");
+
+    lua_pushboolean(L, appTransferBool);
+    lua_setfield(L, -2, "save");
+
+    lua_pushlstring(L, appTransferPath.c_str(), appTransferPath.length());
+    lua_setfield(L, -2, "path");
+
+    lua_pushlstring(L, appTransferLabel.c_str(), appTransferLabel.length());
+    lua_setfield(L, -2, "label");
+
+    lua_pushlstring(L, appTransferString.c_str(), appTransferString.length());
+    lua_setfield(L, -2, "content");
+
+    clearTransferPayload();
+    return 1;
+}
+
 static void registerUiModule(lua_State* L) {
     static const luaL_Reg ui_funcs[] = {
         {"header", lua_ui_header},
@@ -664,6 +809,8 @@ static void registerUiModule(lua_State* L) {
         {"confirm", lua_ui_confirm},
         {"message", lua_ui_message},
         {"viewFile", lua_ui_viewFile},
+        {"editFile", lua_ui_editFile},
+        {"takeEditorResult", lua_ui_takeEditorResult},
         {NULL, NULL}
     };
 

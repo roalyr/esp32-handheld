@@ -2,7 +2,7 @@
 // MODULE: src/lua_scripts.cpp
 // STATUS: [Level 2 - Implementation]
 // TRUTH_LINK: TRUTH_HARDWARE.md Section 1, Section 2, Section 3; TACTICAL_TODO TASK_2
-// LOG_REF: 2026-04-28
+// LOG_REF: 2026-04-30
 
 #include "lua_scripts.h"
 
@@ -447,6 +447,7 @@ local host = {
     crash_title = nil,
     crash_lines = {},
     crash_scroll = 1,
+    launch_popup_until = 0,
     marquee_tick = 0,
     catalog_poll_interval = 3000,
     last_catalog_poll = 0
@@ -673,13 +674,17 @@ function host:launch(descriptor)
     self.active_descriptor = runtime_descriptor
     if not self:invoke(runtime_descriptor, "init", descriptor) then
         self.active_descriptor = nil
+        self.launch_popup_until = 0
+        return
     end
+    self.launch_popup_until = sys.millis() + 2000
 end
 
 function host:close_current_app()
     local preserve_id = self.active_descriptor and self.active_descriptor.id or nil
     self.close_prompt_active = false
     self.close_prompt_leave = false
+    self.launch_popup_until = 0
     self.active_descriptor = nil
     self:refresh_catalog(preserve_id)
 end
@@ -751,6 +756,9 @@ end
 function host:update()
     self.marquee_tick = self.marquee_tick + 1
     self:update_notice()
+    if self.launch_popup_until ~= 0 and sys.millis() >= self.launch_popup_until then
+        self.launch_popup_until = 0
+    end
     if self.active_descriptor then
         self:invoke(self.active_descriptor, "update")
     else
@@ -776,6 +784,9 @@ function host:draw()
 
     if self.notice then
         draw_notice(self.notice)
+    end
+    if self.launch_popup_until ~= 0 then
+        ui.message("App starting", "ALT:Exit")
     end
     if self.close_prompt_active then
         ui.confirm("Leave app?", self.close_prompt_leave)
@@ -829,6 +840,13 @@ function host:input(key)
             self:handle_close_prompt_input(key)
             return
         end
+        if self.launch_popup_until ~= 0 then
+            if key == input.KEY_ALT then
+                self.close_prompt_active = true
+                self.close_prompt_leave = false
+            end
+            return
+        end
         if key == input.KEY_ALT then
             self.close_prompt_active = true
             self.close_prompt_leave = false
@@ -853,6 +871,7 @@ function host:init()
     self.crash_title = nil
     self.crash_lines = {}
     self.crash_scroll = 1
+    self.launch_popup_until = 0
     self.marquee_tick = 0
     self.last_catalog_poll = 0
     self:refresh_catalog(nil)
@@ -952,7 +971,43 @@ function file_browser:init()
     self:load_path("/")
 end
 
+function file_browser:refresh_current_path(selected_path)
+    local path = self.current_path
+    local previous_scroll = self.scroll
+    if selected_path then
+        self.selection_memory[path] = selected_path
+    end
+    self:load_path(path)
+    self.scroll = previous_scroll
+    self:ensure_visible(4)
+end
+
+function file_browser:consume_editor_result()
+    local result = ui.takeEditorResult()
+    if not result then
+        return
+    end
+
+    if not result.save then
+        return
+    end
+
+    local ok, err = fs.write(result.path, result.content)
+    if not ok then
+        if err == "SD not mounted" then
+            self:show_message("No SD card mounted")
+        else
+            self:show_toast(err or "Save failed", 2000)
+        end
+        return
+    end
+
+    self:refresh_current_path(result.path)
+    self:show_message("File saved")
+end
+
 function file_browser:update()
+    self:consume_editor_result()
     if self.toast and sys.millis() >= self.toast_until then
         self.toast = nil
         self.toast_until = 0
@@ -1002,7 +1057,7 @@ function file_browser:open_selected()
         self:load_path(entry.path)
         return
     end
-    local ok, err = ui.viewFile(entry.path, entry.name)
+    local ok, err = ui.editFile(entry.path, entry.name)
     if not ok then
         if err == "SD not mounted" then
             self:show_message("No SD card mounted")

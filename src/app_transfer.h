@@ -39,6 +39,7 @@ enum AppTransferDocumentSourceKind {
 extern App* appTransferCaller;   // App to return to when operation completes
 extern int appTransferAction;    // One of AppTransferAction
 extern bool appTransferBool;     // Yes/No result storage
+extern bool appTransferResultReady; // True only when a launched flow has produced a result to consume
 extern String appTransferString; // Generic string payload (filename or file content)
 extern String appTransferPath;   // Path (used for file paths)
 extern String appTransferLabel;  // Display label/title for editor or prompt flows

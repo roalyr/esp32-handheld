@@ -1,43 +1,51 @@
-## CURRENT GOAL: Lua File Browser Read-Only Viewer Handoff
+## CURRENT GOAL: Lua SD File Edit Save-Back
 - TARGET_FILE: src/main.cpp
 - TRUTH_RELIANCE: TRUTH_HARDWARE.md Section 0 (ESP32-S2-Mini memory limits), Section 0.1 and Section 3 (dedicated SD SPI bus and SD CS pin), Section 1 (128x64 ST7920 display constraints), Section 2 (4x5 key matrix and special keys); TRUTH_FLASHING.md Quick Reference + Flashing Procedure
 - TECHNICAL_CONSTRAINTS:
   - TRUTH_PROJECT.md is not present in workspace; no additional constraints may be inferred beyond explicit Truth files.
 - ATOMIC_TASKS:
-  - [x] TASK_1: Bridge read-only viewer sessions from `MODE_LUA` into the canonical C++ viewer without breaking ownership or return-to-Lua flow.
+  - [x] TASK_1: Bridge read-write editor sessions from `MODE_LUA` into the canonical C++ editor and preserve the completed save/cancel payload long enough for Lua to consume it on return.
     Required signatures:
     - src/app_control.h:
-      - Declare a helper that enters a specific C++ app from `MODE_LUA` and marks the session to return to Lua when that app exits.
+      - Keep `launchLuaOwnedApp(App* newApp);` as the canonical Lua-owned app entry point.
     - src/main.cpp:
-      - Implement the helper and extend the `appT9Editor.exitRequested` return path so transfer-launched viewer sessions can restore `MODE_LUA` instead of defaulting to `appSettings`.
+      - Extend the `appT9Editor.exitRequested` return path so Lua-owned read-write sessions do not clear the completed transfer payload before Lua resumes.
       - Preserve existing `ESC` semantics for normal Lua/Desktop and Settings flows.
     - src/lua_vm.cpp:
-      - Register one minimal Lua binding that loads an SD file into the existing `appTransfer` payload and launches `appT9Editor` in `APP_TRANSFER_EDITOR_READ_ONLY` mode through the new helper.
+      - Add one minimal `ui.editFile(path, label)` launch binding and one one-shot result-consumption binding for resumed Lua code.
     - src/lua_vm.h:
-      - Add declarations only for new runtime entrypoints that are strictly required by the viewer-launch binding.
+      - Remain unchanged unless the new result bridge needs a strictly necessary declaration.
     Required behavior:
-    - Viewer sessions launched from Lua enter `MODE_SETTINGS` only for the duration of the viewer session.
-    - Exiting that viewer returns directly to `MODE_LUA`, not to the Settings root.
-    - The canonical `T9EditorApp` remains the only text-view implementation; no parallel Lua text viewer is introduced.
+    - Editable sessions launched from Lua enter `MODE_SETTINGS` only for the duration of the editor session.
+    - Exiting with save keeps the edited buffer, source path, and action metadata available until Lua consumes the result once.
+    - Exiting without save returns to Lua without writing the file.
+    - The canonical `T9EditorApp` remains the only text-editor implementation.
 
-  - [x] TASK_2: Replace the built-in Lua file browser's regular-file open stub with real read-only viewer dispatch while keeping discovery semantics unchanged.
+  - [x] TASK_2: Replace the built-in Lua file browser's regular-file open flow with edit/save-back handling for existing SD files while preserving current browsing semantics.
     Required signatures:
     - src/lua_scripts.cpp:
-      - Replace the regular-file path inside `file_browser:open_selected()` so it calls the new read-only viewer binding instead of showing the current stub toast.
-      - Preserve directory navigation, selection memory, current view-mode state, and the existing desktop discovery contract.
+      - Replace the regular-file path inside `file_browser:open_selected()` so it launches the editable binding instead of the read-only viewer binding, and consume the returned editor result during the resumed Lua flow.
+    - src/lua_vm.cpp:
+      - Add the narrow SD write helper or binding strictly required for the built-in file browser to persist the returned buffer to the original path.
     - src/lua_scripts.h:
-      - Remain unchanged unless the implementation explicitly splits the embedded desktop/browser payloads further.
+      - Remain unchanged unless the embedded payload split is explicitly required.
+    Reference pattern:
+    - src/apps/file_browser.cpp may be reused as a behavior template for editor-return handling, but it must not be revived as the implementation target.
     Required behavior:
     - `ENTER` on a directory still navigates into that directory; `LEFT` and `BKSP` still navigate to parent.
-    - `ENTER` on a regular file opens the canonical read-only viewer instead of a stub message.
-    - Returning from the viewer preserves the current file-browser path, selected entry, and current `TAB` view mode.
-    - Desktop discovery remains the only path that launches SD desktop apps; opening a `.lua` file from the browser views it as text rather than executing it.
+    - `ENTER` on a regular file opens the canonical read-write editor instead of the read-only viewer.
+    - Saving from the editor writes the updated content back to the same SD path; canceling leaves the file unchanged.
+    - Returning from the editor preserves the current file-browser path, selected entry, and current `TAB` view mode.
+    - Desktop discovery remains the only path that launches SD desktop apps; opening a `.lua` file from the browser edits it as text rather than executing it.
 
-  - [x] VERIFICATION: Build, flash, and fixture-backed on-device viewer handoff checklist
+  - [x] VERIFICATION: Build, flash, and fixture-backed on-device edit/save-back checklist
     Success criteria/tests to run:
     - `pio run -e lolin_s2_mini` completes with zero errors.
     - Flash via `bash scripts/flash.sh` using the DFU flow from TRUTH_FLASHING.md.
-    - With an SD card containing the mirrored fixture set from `data_backup/SD card contents/`, `blank_app (bad icon).lua` does not appear on the desktop, while `blank_app (bad code).lua` still appears and still triggers the existing crash-popup path when launched from the desktop.
-    - In the built-in Lua file browser, `New Folder/` opens as a directory, `New Empty File` opens in the canonical read-only viewer, and `blank_app (bad code).lua` opens as text in the canonical read-only viewer rather than executing.
-    - Exiting the viewer returns directly to the Lua desktop/browser, preserving the current path, selection, and view mode.
-    - `ESC` still transitions into Settings cleanly when no viewer session is active.
+    - In the built-in Lua file browser, `New Folder/` still opens as a directory, `LEFT` and `BKSP` still return to parent, and `New Empty File` opens in the canonical read-write editor.
+    - Editing an existing SD file and exiting with save persists the updated content when the file is reopened.
+    - Canceling an edit session leaves the original file unchanged after reopening.
+    - `blank_app (bad code).lua` still appears on the desktop and still follows the existing crash-popup path when launched from desktop discovery, but opening it from the browser edits it as text instead of executing it.
+    - Exiting the editor returns directly to the Lua desktop/browser, preserving the current path, selection, and view mode.
+    - `ESC` still transitions into Settings cleanly when no Lua-owned editor session is active.
+    - Current limitation accepted for this milestone: FAT modified timestamps are not advanced yet because no RTC time source is installed; file content persistence is the required verification target for now.

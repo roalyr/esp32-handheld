@@ -10,6 +10,7 @@
 App* appTransferCaller = nullptr;
 int appTransferAction = ACTION_NONE;
 bool appTransferBool = false;
+bool appTransferResultReady = false;
 String appTransferString = "";
 String appTransferPath = "";
 String appTransferLabel = "";

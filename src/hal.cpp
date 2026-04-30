@@ -134,7 +134,6 @@ bool sdBeginSession() {
     SdSpiConfig spiCfg(PIN_SD_CS, DEDICATED_SPI, SD_SCK_MHZ(4), &sdSpi);
     if (sdFat.begin(spiCfg)) {
         sdSessionActive = true;
-        Serial.println("[HAL] SdFat OK (HW SPI, 4MHz)");
         return true;
     }
     Serial.printf("[HAL] SdFat fail type=%d code=0x%02X\n",

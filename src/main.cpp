@@ -3,7 +3,7 @@
 // MODULE: src/main.cpp
 // STATUS: [Level 2 - Implementation]
 // TRUTH_LINK: TACTICAL_TODO TASK_1
-// LOG_REF: 2026-04-22
+// LOG_REF: 2026-04-30
 //
 
 #include <Arduino.h>
@@ -34,15 +34,28 @@ static bool luaError = false;
 static String luaErrorMsg = "";
 static App* activeSettingsApp = nullptr;
 static bool returnToLuaOnAppExit = false;
+static bool suppressLuaInputUntilRelease = false;
 
 static void clearAppTransferState() {
     appTransferAction = ACTION_NONE;
     appTransferBool = false;
+    appTransferResultReady = false;
     appTransferString = "";
     appTransferPath = "";
     appTransferEditorMode = APP_TRANSFER_EDITOR_DEFAULT;
     appTransferSourceKind = APP_TRANSFER_SOURCE_DEFAULT;
     appTransferLabel = "";
+}
+
+static bool shouldPreserveLuaOwnedEditorResult(App* exitingApp, bool shouldReturnToLua) {
+    if (!shouldReturnToLua || exitingApp != &appT9Editor) {
+        return false;
+    }
+    if (appTransferAction == ACTION_VIEW_FILE ||
+        appTransferEditorMode == APP_TRANSFER_EDITOR_READ_ONLY) {
+        return false;
+    }
+    return appTransferAction == ACTION_EDIT_FILE;
 }
 
 void switchApp(App* newApp) {
@@ -68,8 +81,9 @@ void launchLuaOwnedApp(App* newApp) {
 
     if (currentMode == MODE_LUA) {
         currentMode = MODE_SETTINGS;
-        activeSettingsApp = nullptr;
         returnToLuaOnAppExit = true;
+        switchApp(newApp);
+        return;
     }
 
     switchApp(newApp);
@@ -314,6 +328,11 @@ void loop() {
                         }
                     }
                 } else {
+                    if (suppressLuaInputUntilRelease) {
+                        if (activeKeyCount == 0) {
+                            suppressLuaInputUntilRelease = false;
+                        }
+                    } else {
                     // Forward keys to Lua (just-pressed + repeats for repeatable keys)
                     for (int i = 0; i < activeKeyCount; i++) {
                         char key = activeKeys[i];
@@ -327,6 +346,7 @@ void loop() {
                                 }
                             }
                         }
+                    }
                     }
                     
                     // Frame update
@@ -356,15 +376,17 @@ void loop() {
                     appT9Editor.exitRequested = false;
                     bool shouldReturnToLua = returnToLuaOnAppExit;
                     returnToLuaOnAppExit = false;
+                    bool preserveLuaResult = shouldPreserveLuaOwnedEditorResult(settingsApp, shouldReturnToLua);
                     App* returnApp = (appTransferCaller != nullptr) ? appTransferCaller : static_cast<App*>(&appSettings);
                     appTransferCaller = nullptr;
-                    if (shouldReturnToLua || returnApp == &appSettings) {
+                    if (!preserveLuaResult && (shouldReturnToLua || returnApp == &appSettings)) {
                         clearAppTransferState();
                     }
                     if (shouldReturnToLua) {
                         appT9Editor.stop();
                         activeSettingsApp = nullptr;
                         currentMode = MODE_LUA;
+                        suppressLuaInputUntilRelease = true;
                     } else {
                         switchApp(returnApp);
                     }

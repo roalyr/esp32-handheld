@@ -16,28 +16,28 @@ Discovery rules:
 
 Host object injected into SD apps:
 - host.close()
-  Close the running app and return to the desktop.
+ Close the running app and return to the desktop.
 - host.notice(message, duration_ms)
-  Show a transient notice on top of the desktop host.
+ Show a transient notice on top of the desktop host.
 - host.source_path
-  Full SD path of the launched app file.
+ Full SD path of the launched app file.
 
 APP callbacks used by the desktop host:
 - function APP:init(descriptor)
-  Called once when the app launches.
+ Called once when the app launches.
 - function APP:update()
-  Called every frame while the app is active.
+ Called every frame while the app is active.
 - function APP:draw(descriptor)
-  Called every frame. The app is responsible for drawing the full screen.
+ Called every frame. The app is responsible for drawing the full screen.
 - function APP:input(key)
-  Called for just-pressed, repeating, and long-press key events.
+ Called for just-pressed, repeating, and long-press key events.
 
 CUSTOM MODULE: gfx
 ==================
 - gfx.clear()
-  Clear the display buffer.
+ Clear the display buffer.
 - gfx.send()
-  Send the current buffer to the LCD.
+ Send the current buffer to the LCD.
 - gfx.pixel(x, y)
 - gfx.line(x1, y1, x2, y2)
 - gfx.rect(x, y, w, h)
@@ -46,29 +46,29 @@ CUSTOM MODULE: gfx
 - gfx.fillCircle(x, y, r)
 - gfx.text(x, y, str)
 - gfx.setFont(size)
-  0=small, 1=medium, 2=large, 3=tiny.
+ 0=small, 1=medium, 2=large, 3=tiny.
 - gfx.setColor(color)
-  0=black, 1=white.
+ 0=black, 1=white.
 - gfx.width()
 - gfx.height()
 
 Example:
-  gfx.clear()
-  gfx.setFont(0)
-  gfx.text(2, 10, "Hello")
-  gfx.rect(0, 12, 40, 10)
-  gfx.send()
+ gfx.clear()
+ gfx.setFont(0)
+ gfx.text(2, 10, "Hello")
+ gfx.rect(0, 12, 40, 10)
+ gfx.send()
 
 CUSTOM MODULE: input
 ====================
 - input.pressed(key)
-  True if the key was just pressed this frame.
+ True if the key was just pressed this frame.
 - input.held(key)
-  True while the key is currently held.
+ True while the key is currently held.
 - input.anyPressed()
-  True if any key was just pressed this frame.
+ True if any key was just pressed this frame.
 - input.getKeys()
-  Returns an array of keys that are currently held.
+ Returns an array of keys that are currently held.
 
 Key constants:
 - input.KEY_ESC
@@ -83,78 +83,78 @@ Key constants:
 - input.KEY_RIGHT
 
 Example:
-  if key == input.KEY_ENTER then
-      host.notice("Pressed Enter", 1000)
-  end
+ if key == input.KEY_ENTER then
+  host.notice("Pressed Enter", 1000)
+ end
 
 CUSTOM MODULE: sys
 ==================
 - sys.millis()
-  Milliseconds since boot.
+ Milliseconds since boot.
 - sys.delay(ms)
 - sys.yield()
 - sys.time()
-  Returns {hours=, minutes=, seconds=}.
+ Returns {hours=, minutes=, seconds=}.
 - sys.timeStr()
-  Returns HH:MM:SS.
+ Returns HH:MM:SS.
 - sys.version()
-  Returns firmware version string.
+ Returns firmware version string.
 - sys.memInfo()
-  Returns a table with:
-  heap_total, heap_free, heap_min_free, heap_max_alloc,
-  psram_found, psram_total, psram_free, psram_min_free, psram_max_alloc.
+ Returns a table with:
+ heap_total, heap_free, heap_min_free, heap_max_alloc,
+ psram_found, psram_total, psram_free, psram_min_free, psram_max_alloc.
 - print(...)
-  Global serial print helper.
+ Global serial print helper.
 
 Example:
-  local now = sys.time()
-  print("time", sys.timeStr(), now.hours, now.minutes)
-  local mem = sys.memInfo()
-  print("heap", mem.heap_free, "/", mem.heap_total, "psram", mem.psram_free, "/", mem.psram_total)
+ local now = sys.time()
+ print("time", sys.timeStr(), now.hours, now.minutes)
+ local mem = sys.memInfo()
+ print("heap", mem.heap_free, "/", mem.heap_total, "psram", mem.psram_free, "/", mem.psram_total)
 
 CUSTOM MODULE: fs
 =================
 - fs.list(path)
-  Returns an array of entries or nil, err.
-  Entry fields:
-  name, path, is_dir, size, modified, modified_time, modified_short, modified_full
+ Returns an array of entries or nil, err.
+ Entry fields:
+ name, path, is_dir, size, modified, modified_time, modified_short, modified_full
 - fs.read(path)
-  Returns file contents or nil, err.
+ Returns file contents or nil, err.
 - fs.write(path, content)
-  Writes a full text file. Returns true or nil, err.
+ Writes a full text file. Returns true or nil, err.
 
 Example:
-  local entries, err = fs.list("/")
-  if not entries then
-      print("fs.list failed", err)
-  else
-      for _, entry in ipairs(entries) do
-          print(entry.name, entry.is_dir and "dir" or entry.size)
-      end
+ local entries, err = fs.list("/")
+ if not entries then
+  print("fs.list failed", err)
+ else
+  for _, entry in ipairs(entries) do
+  print(entry.name, entry.is_dir and "dir" or entry.size)
   end
+ end
 
 CUSTOM MODULE: ui
 =================
 - ui.header(title, rightText)
 - ui.footer(leftHint, rightHint)
 - ui.confirm(message, yesSelected)
-  Draws the shared yes/no prompt.
+ Draws the shared yes/no prompt.
 - ui.message(message, buttonLabel, invertButton)
-  Draws the shared informational dialog.
+ Draws the shared informational dialog.
 - ui.choice3(message, label0, label1, label2, selectedIndex)
-  Draws the shared 3-option dialog.
+ Draws the shared 3-option dialog.
 - ui.viewFile(path, label)
-  Open an SD text file in the native RO viewer.
+ Open an SD text file in the native RO viewer.
 - ui.editFile(path, label)
-  Open an SD text file in the native RW editor.
-  Files above the RW cap are rejected.
+ Open an SD text file in the native RW editor.
+ Files above the RW cap are rejected.
 - ui.takeEditorResult()
-  After a Lua-owned RW edit session returns, this gives a table with:
-  action, save, path, label, source_kind, content
+ After a Lua-owned RW edit session returns, this gives a table with:
+ action, save, path, label, source_kind, content
 
 Example:
-  ui.header("Files", "1/8")
-  ui.footer("ENT:Open", "ESC:Back")
+ ui.header("Files", "1/8")
+ ui.footer("ENT:Open", "ESC:Back")
 
 CUSTOM MODULE: t9
 =================
@@ -172,9 +172,9 @@ CUSTOM MODULE: t9
 - t9.getCharCount()
 
 Example:
-  t9.reset()
-  t9.setText("hello")
-  print(t9.getText(), t9.getCursorByte())
+ t9.reset()
+ t9.setText("hello")
+ print(t9.getText(), t9.getCursorByte())
 
 STANDARD LIBRARIES
 ==================

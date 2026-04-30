@@ -10,6 +10,8 @@
 #include "../app_control.h"
 #include "../app_transfer.h"
 #include "../gui.h"
+#include "../lua_binding_help.h"
+#include "../lua_blank_app_template.h"
 #include "../config.h"
 #include "../clock.h"
 #include "../hal.h"
@@ -20,6 +22,113 @@ extern T9EditorApp appT9Editor;
 extern bool sleepEnabled;
 
 static const char* kSettingsBatteryStub = "BAT --.-V";
+static const uint32_t kSettingsPhysicalRamK = 320;
+
+namespace {
+
+struct SettingsSdSessionGuard {
+    bool active = false;
+
+    bool begin() {
+        active = sdBeginSession();
+        return active;
+    }
+
+    ~SettingsSdSessionGuard() {
+        if (active) {
+            sdEndSession();
+        }
+    }
+};
+
+static String getPathTail(const String& path) {
+    int slash = path.lastIndexOf('/');
+    if (slash >= 0 && slash + 1 < path.length()) {
+        return path.substring(slash + 1);
+    }
+    return path;
+}
+
+static void launchSettingsViewerBuffer(App* caller, const String& label, const String& content) {
+    appTransferAction = ACTION_VIEW_FILE;
+    appTransferBool = false;
+    appTransferResultReady = false;
+    appTransferString = content;
+    appTransferPath = "";
+    appTransferLabel = label;
+    appTransferEditorMode = APP_TRANSFER_EDITOR_READ_ONLY;
+    appTransferSourceKind = APP_TRANSFER_SOURCE_BUFFER;
+    appTransferCaller = caller;
+    switchApp(&appT9Editor);
+}
+
+static void launchSettingsEditorFile(App* caller, const String& path, const String& label) {
+    appTransferAction = ACTION_EDIT_FILE;
+    appTransferBool = false;
+    appTransferResultReady = false;
+    appTransferString = "";
+    appTransferPath = path;
+    appTransferLabel = label;
+    appTransferEditorMode = APP_TRANSFER_EDITOR_READ_WRITE;
+    appTransferSourceKind = APP_TRANSFER_SOURCE_PAGED_FILE;
+    appTransferCaller = caller;
+    switchApp(&appT9Editor);
+}
+
+static bool createBlankLuaAppOnSd(String& createdPath, String& error) {
+    createdPath = "";
+    error = "";
+
+    if (!isSDMounted()) {
+        error = "SD not mounted";
+        return false;
+    }
+
+    SettingsSdSessionGuard session;
+    if (!session.begin()) {
+        error = "Failed to open SD session";
+        return false;
+    }
+
+    String templateText = buildLuaBlankAppTemplateText();
+    for (int index = 0; index < 1000; index++) {
+        String candidate = (index == 0)
+            ? String("/blank_app.lua")
+            : String("/blank_app_") + String(index) + String(".lua");
+
+        FsFile existing;
+        if (existing.open(candidate.c_str(), O_RDONLY)) {
+            existing.close();
+            continue;
+        }
+
+        FsFile file;
+        if (!file.open(candidate.c_str(), O_WRONLY | O_CREAT | O_TRUNC)) {
+            error = String("Failed to create: ") + candidate;
+            return false;
+        }
+
+        const size_t bytesWritten = file.write(
+            reinterpret_cast<const uint8_t*>(templateText.c_str()),
+            templateText.length());
+        if (bytesWritten != templateText.length()) {
+            error = String("Failed to write: ") + candidate;
+            return false;
+        }
+        if (!file.sync()) {
+            error = String("Failed to sync: ") + candidate;
+            return false;
+        }
+
+        createdPath = candidate;
+        return true;
+    }
+
+    error = "No free blank_app name";
+    return false;
+}
+
+}  // namespace
 
 // Helper to get readable name for special keys
 static const char* getKeyName(char key) {
@@ -289,6 +398,14 @@ void SettingsApp::handleInput(char key) {
                 GUI::showToast("Checking SDcard", 450);
                 sdRemountPending = true;
                 sdRemountDeadline = millis() + 450;
+            } else if (selectedIndex == SETTING_NEW_BLANK_LUA_APP) {
+                String createdPath;
+                String error;
+                if (!createBlankLuaAppOnSd(createdPath, error)) {
+                    GUI::showToast(error == "SD not mounted" ? "Mount SD first" : "Create failed", 1400);
+                } else {
+                    launchSettingsEditorFile(this, createdPath, getPathTail(createdPath));
+                }
             } else if (selectedIndex == SETTING_KEY_TESTER) {
                 inKeyTester = true;
                 lastPressedKey = ' ';
@@ -299,6 +416,8 @@ void SettingsApp::handleInput(char key) {
             } else if (selectedIndex == SETTING_SD_TEST) {
                 inSdTest = true;
                 sdTestRan = false;
+            } else if (selectedIndex == SETTING_HELP) {
+                launchSettingsViewerBuffer(this, "Lua Help", buildLuaBindingHelpText());
             } else {
                 editMode = true;
             }
@@ -348,31 +467,35 @@ void SettingsApp::renderInfoHeader() {
     u8g2.setDrawColor(0);
     u8g2.setFont(GUI::FONT_TINY);
 
-    const uint32_t totalRamK = ESP.getHeapSize() / 1024;
-    const uint32_t freeRamK = ESP.getFreeHeap() / 1024;
-    const uint32_t usedRamK = totalRamK >= freeRamK ? totalRamK - freeRamK : 0;
+    const uint32_t totalHeapK = ESP.getHeapSize() / 1024;
+    const uint32_t freeHeapK = ESP.getFreeHeap() / 1024;
+    const uint32_t usedHeapK = totalHeapK >= freeHeapK ? totalHeapK - freeHeapK : 0;
 
     char headerLine1[48];
     if (isSDMounted()) {
         const uint64_t totalMb = sdTotalBytes() / (1024 * 1024);
         const uint64_t usedMb = sdUsedBytes() / (1024 * 1024);
-        snprintf(headerLine1, sizeof(headerLine1), "RAM %lu/%luk SD %llu/%lluM",
-                 static_cast<unsigned long>(usedRamK),
-                 static_cast<unsigned long>(totalRamK),
+        snprintf(headerLine1, sizeof(headerLine1), "HEAP %lu/%luk SD %llu/%lluM",
+                 static_cast<unsigned long>(usedHeapK),
+                 static_cast<unsigned long>(totalHeapK),
                  static_cast<unsigned long long>(usedMb),
                  static_cast<unsigned long long>(totalMb));
     } else {
-        snprintf(headerLine1, sizeof(headerLine1), "RAM %lu/%luk SD --/--M",
-                 static_cast<unsigned long>(usedRamK),
-                 static_cast<unsigned long>(totalRamK));
+        snprintf(headerLine1, sizeof(headerLine1), "HEAP %lu/%luk SD --/--M",
+                 static_cast<unsigned long>(usedHeapK),
+                 static_cast<unsigned long>(totalHeapK));
     }
     u8g2.drawStr(2, 6, headerLine1);
 
     char timeBuf[8];
     SystemClock::getTimeString(timeBuf, sizeof(timeBuf));
 
-    char headerLine2[40];
-    snprintf(headerLine2, sizeof(headerLine2), "v%s %s %s", FIRMWARE_VERSION, timeBuf, kSettingsBatteryStub);
+    char headerLine2[48];
+    snprintf(headerLine2, sizeof(headerLine2), "v%s %s %s PHY%luk",
+             FIRMWARE_VERSION,
+             timeBuf,
+             kSettingsBatteryStub,
+             static_cast<unsigned long>(kSettingsPhysicalRamK));
     u8g2.drawStr(2, 13, headerLine2);
     u8g2.drawHLine(0, 17, GUI::SCREEN_WIDTH);
 }
@@ -415,6 +538,9 @@ void SettingsApp::renderSettingsList() {
                 snprintf(buf, sizeof(buf), "Backlight: %d%%", pct);
             break;
         }
+        case SETTING_NEW_BLANK_LUA_APP:
+            snprintf(buf, sizeof(buf), "New blank .lua app");
+            break;
         case SETTING_RO_PAGE_SIZE: {
             const size_t pageBytes = getT9EditorReadOnlyPageSizeOption(tempReadOnlyPageSizeIndex);
             if (editMode && isSelected)
@@ -431,6 +557,9 @@ void SettingsApp::renderSettingsList() {
             break;
         case SETTING_SD_TEST:
             snprintf(buf, sizeof(buf), "SD pin tester");
+            break;
+        case SETTING_HELP:
+            snprintf(buf, sizeof(buf), "Help");
             break;
         default:
             buf[0] = '\0';

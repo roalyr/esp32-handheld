@@ -580,6 +580,7 @@ T9EditorApp::T9EditorApp() {
     sessionSourceSize = 0;
     documentLabel = "T9 EDITOR";
     documentPath = "";
+    sourceBuffer = "";
     documentBuffer = "";
     resetPagedSession();
     exitRequested = false;
@@ -596,6 +597,7 @@ void T9EditorApp::start() {
                  ? SOURCE_PAGED_FILE
                  : SOURCE_BUFFER;
     documentPath = appTransferPath;
+    sourceBuffer = appTransferString;
     documentBuffer = appTransferString;
     documentLabel = appTransferLabel;
     resetPagedSession();
@@ -652,6 +654,15 @@ void T9EditorApp::start() {
             documentPath = "";
         }
     }
+    if (isReadOnly() && sourceKind == SOURCE_BUFFER) {
+        String error;
+        sourcePageSize = static_cast<int>(getT9EditorReadOnlyPageBytes());
+        if (!loadPagedDocument(error)) {
+            Serial.printf("[T9Editor] Buffer paging setup failed: %s\n", error.c_str());
+            sourceBuffer = error;
+            documentBuffer = error;
+        }
+    }
     Serial.printf("[T9Editor] Open mode: %s path=%s action=%d\n",
                   isReadOnly() ? "RO" : "RW",
                   documentPath.length() > 0 ? documentPath.c_str() : "(buffer)",
@@ -662,6 +673,7 @@ void T9EditorApp::start() {
 
 void T9EditorApp::stop() {
     visualLines.clear();
+    sourceBuffer = "";
     documentBuffer = "";
     documentLabel = "T9 EDITOR";
     documentPath = "";
@@ -1487,6 +1499,11 @@ bool T9EditorApp::saveCurrentPage(String& error) {
 
 bool T9EditorApp::loadPagedDocument(String& error) {
     if (isReadOnly()) {
+        if (sourceKind == SOURCE_BUFFER) {
+            updatePagedDocumentMetrics(static_cast<size_t>(sourceBuffer.length()));
+            currentPageIndex = 0;
+            return loadPageByIndex(0, error);
+        }
         size_t fileSize = 0;
         if (!statPagedDocument(fileSize, error)) return false;
         updatePagedDocumentMetrics(fileSize);
@@ -1506,6 +1523,32 @@ bool T9EditorApp::loadPagedDocument(String& error) {
 
 bool T9EditorApp::loadPageByIndex(int pageIndex, String& error) {
     if (isReadOnly()) {
+        if (sourceKind == SOURCE_BUFFER) {
+            const size_t bufferSize = static_cast<size_t>(sourceBuffer.length());
+            updatePagedDocumentMetrics(bufferSize);
+            if (pageIndex < 0 || pageIndex >= totalPageCount) {
+                error = "Requested page is out of range";
+                return false;
+            }
+
+            const size_t start = static_cast<size_t>(pageIndex) * static_cast<size_t>(sourcePageSize);
+            size_t length = 0;
+            if (bufferSize > start) {
+                const size_t remaining = bufferSize - start;
+                length = remaining < static_cast<size_t>(sourcePageSize) ? remaining : static_cast<size_t>(sourcePageSize);
+            }
+
+            documentBuffer = sourceBuffer.substring(static_cast<unsigned int>(start),
+                                                    static_cast<unsigned int>(start + length));
+            pageStartOffset = start;
+            pageOriginalLength = length;
+            currentPageIndex = pageIndex;
+            pageDirty = false;
+            cursorPos = 0;
+            scrollOffset = 0;
+            error = "";
+            return true;
+        }
         size_t fileSize = 0;
         if (!statPagedDocument(fileSize, error)) {
             return false;
@@ -1568,11 +1611,17 @@ bool T9EditorApp::loadPageByIndex(int pageIndex, String& error) {
     return true;
 }
 
+bool T9EditorApp::isReadOnlyPaged() const {
+    return isReadOnly() && totalPageCount > 0;
+}
+
 bool T9EditorApp::hasPreviousPage() const {
+    if (isReadOnlyPaged()) return currentPageIndex > 0;
     return sourceKind == SOURCE_PAGED_FILE && currentPageIndex > 0;
 }
 
 bool T9EditorApp::hasNextPage() const {
+    if (isReadOnlyPaged()) return currentPageIndex + 1 < totalPageCount;
     return sourceKind == SOURCE_PAGED_FILE && currentPageIndex + 1 < totalPageCount;
 }
 
@@ -1993,7 +2042,7 @@ void T9EditorApp::handleInput(char key) {
         return;
     }
 
-    if (isReadOnly() && sourceKind == SOURCE_PAGED_FILE) {
+    if (isReadOnlyPaged()) {
         if (key == KEY_UP) {
             if (scrollOffset > 0) {
                 scrollOffset--;
@@ -2447,7 +2496,7 @@ void T9EditorApp::recalculateLayout() {
     }
 
     int visibleLines = getVisibleLineCount();
-    if (isReadOnly() && sourceKind == SOURCE_PAGED_FILE) {
+    if (isReadOnlyPaged()) {
         int maxScroll = max(0, static_cast<int>(visualLines.size()) - visibleLines);
         if (scrollOffset < 0) scrollOffset = 0;
         if (scrollOffset > maxScroll) scrollOffset = maxScroll;
@@ -2463,7 +2512,7 @@ void T9EditorApp::renderHeader() {
 
     char rightText[24];
     if (isReadOnly()) {
-        if (sourceKind == SOURCE_PAGED_FILE && totalPageCount > 0) {
+        if (totalPageCount > 0) {
             snprintf(rightText, sizeof(rightText), "RO %d/%d", currentPageIndex + 1, totalPageCount);
         } else {
             snprintf(rightText, sizeof(rightText), "RO");

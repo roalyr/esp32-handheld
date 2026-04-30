@@ -18,11 +18,13 @@ class SettingsApp : public App {
     enum SettingItem {
       SETTING_SD_REMOUNT = 0,
       SETTING_BRIGHTNESS,
+      SETTING_NEW_BLANK_LUA_APP,
       SETTING_RO_PAGE_SIZE,
-        SETTING_KEY_TESTER,
-        SETTING_LCD_TEST,
-        SETTING_SD_TEST,
-        SETTING_COUNT
+      SETTING_KEY_TESTER,
+      SETTING_LCD_TEST,
+      SETTING_SD_TEST,
+      SETTING_HELP,
+      SETTING_COUNT
     };
     
     int selectedIndex;

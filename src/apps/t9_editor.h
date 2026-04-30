@@ -72,6 +72,7 @@ class T9EditorApp : public App {
   size_t sessionSourceSize;
   String documentLabel;
   String documentPath;
+  String sourceBuffer;
   String documentBuffer;
   size_t pageStartOffset;
   size_t pageOriginalLength;
@@ -144,6 +145,7 @@ class T9EditorApp : public App {
   String getClipboardManifestPath() const;
   String getClipboardSlotPath(int slot) const;
   String buildDefaultHistoryDocumentId() const;
+  bool isReadOnlyPaged() const;
   bool hasPreviousPage() const;
   bool hasNextPage() const;
   void beginPendingPageAction(PendingPagedAction action);

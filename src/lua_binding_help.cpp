@@ -99,12 +99,18 @@ CUSTOM MODULE: sys
   Returns HH:MM:SS.
 - sys.version()
   Returns firmware version string.
+- sys.memInfo()
+  Returns a table with:
+  heap_total, heap_free, heap_min_free, heap_max_alloc,
+  psram_found, psram_total, psram_free, psram_min_free, psram_max_alloc.
 - print(...)
   Global serial print helper.
 
 Example:
   local now = sys.time()
   print("time", sys.timeStr(), now.hours, now.minutes)
+  local mem = sys.memInfo()
+  print("heap", mem.heap_free, "/", mem.heap_total, "psram", mem.psram_free, "/", mem.psram_total)
 
 CUSTOM MODULE: fs
 =================

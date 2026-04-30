@@ -61,6 +61,10 @@ function APP:init(descriptor)
     -- Example: prepare the built-in T9 engine if your app uses it.
     -- t9.reset()
     -- t9.setText("hello")
+
+    -- Example: inspect heap and PSRAM availability.
+    -- local mem = sys.memInfo()
+    -- print("heap free", mem.heap_free, "psram free", mem.psram_free)
 end
 
 function APP:update()

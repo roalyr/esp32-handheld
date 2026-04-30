@@ -557,6 +557,41 @@ static int lua_sys_version(lua_State* L) {
     return 1;
 }
 
+// sys.memInfo() - Get heap/PSRAM stats as a table
+static int lua_sys_memInfo(lua_State* L) {
+    lua_newtable(L);
+
+    lua_pushinteger(L, ESP.getHeapSize());
+    lua_setfield(L, -2, "heap_total");
+
+    lua_pushinteger(L, ESP.getFreeHeap());
+    lua_setfield(L, -2, "heap_free");
+
+    lua_pushinteger(L, ESP.getMinFreeHeap());
+    lua_setfield(L, -2, "heap_min_free");
+
+    lua_pushinteger(L, ESP.getMaxAllocHeap());
+    lua_setfield(L, -2, "heap_max_alloc");
+
+    const uint32_t psramTotal = ESP.getPsramSize();
+    lua_pushboolean(L, psramTotal > 0);
+    lua_setfield(L, -2, "psram_found");
+
+    lua_pushinteger(L, psramTotal);
+    lua_setfield(L, -2, "psram_total");
+
+    lua_pushinteger(L, ESP.getFreePsram());
+    lua_setfield(L, -2, "psram_free");
+
+    lua_pushinteger(L, ESP.getMinFreePsram());
+    lua_setfield(L, -2, "psram_min_free");
+
+    lua_pushinteger(L, ESP.getMaxAllocPsram());
+    lua_setfield(L, -2, "psram_max_alloc");
+
+    return 1;
+}
+
 // print(str) - Print to serial
 static int lua_print(lua_State* L) {
     int n = lua_gettop(L);
@@ -585,6 +620,7 @@ static void registerSysModule(lua_State* L) {
         {"time", lua_sys_time},
         {"timeStr", lua_sys_timeStr},
         {"version", lua_sys_version},
+        {"memInfo", lua_sys_memInfo},
         {NULL, NULL}
     };
     

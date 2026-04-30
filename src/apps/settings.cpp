@@ -470,34 +470,58 @@ void SettingsApp::renderInfoHeader() {
     const uint32_t totalHeapK = ESP.getHeapSize() / 1024;
     const uint32_t freeHeapK = ESP.getFreeHeap() / 1024;
     const uint32_t usedHeapK = totalHeapK >= freeHeapK ? totalHeapK - freeHeapK : 0;
+    const uint32_t totalPsramK = ESP.getPsramSize() / 1024;
+    const uint32_t freePsramK = ESP.getFreePsram() / 1024;
+    const uint32_t usedPsramK = totalPsramK >= freePsramK ? totalPsramK - freePsramK : 0;
 
-    char headerLine1[48];
-    if (isSDMounted()) {
-        const uint64_t totalMb = sdTotalBytes() / (1024 * 1024);
-        const uint64_t usedMb = sdUsedBytes() / (1024 * 1024);
-        snprintf(headerLine1, sizeof(headerLine1), "HEAP %lu/%luk SD %llu/%lluM",
-                 static_cast<unsigned long>(usedHeapK),
-                 static_cast<unsigned long>(totalHeapK),
-                 static_cast<unsigned long long>(usedMb),
-                 static_cast<unsigned long long>(totalMb));
+    auto drawInfoRow = [](int baselineY, const char* leftText, const char* rightText) {
+        if (leftText && leftText[0] != '\0') {
+            u8g2.drawStr(2, baselineY, leftText);
+        }
+        if (rightText && rightText[0] != '\0') {
+            int rightX = GUI::SCREEN_WIDTH - 2 - u8g2.getStrWidth(rightText);
+            if (rightX < 2) rightX = 2;
+            u8g2.drawStr(rightX, baselineY, rightText);
+        }
+    };
+
+    char heapLeft[24];
+    char heapRight[16];
+    snprintf(heapLeft, sizeof(heapLeft), "HEAP %lu/%luk",
+             static_cast<unsigned long>(usedHeapK),
+             static_cast<unsigned long>(totalHeapK));
+    snprintf(heapRight, sizeof(heapRight), "INT %luk",
+             static_cast<unsigned long>(kSettingsPhysicalRamK));
+    drawInfoRow(6, heapLeft, heapRight);
+
+    char psramLeft[28];
+    if (totalPsramK > 0) {
+        snprintf(psramLeft, sizeof(psramLeft), "PSRAM %lu/%luk",
+                 static_cast<unsigned long>(usedPsramK),
+                 static_cast<unsigned long>(totalPsramK));
     } else {
-        snprintf(headerLine1, sizeof(headerLine1), "HEAP %lu/%luk SD --/--M",
-                 static_cast<unsigned long>(usedHeapK),
-                 static_cast<unsigned long>(totalHeapK));
+        snprintf(psramLeft, sizeof(psramLeft), "PSRAM none");
     }
-    u8g2.drawStr(2, 6, headerLine1);
+    drawInfoRow(13, psramLeft, kSettingsBatteryStub);
 
     char timeBuf[8];
     SystemClock::getTimeString(timeBuf, sizeof(timeBuf));
 
-    char headerLine2[48];
-    snprintf(headerLine2, sizeof(headerLine2), "v%s %s %s PHY%luk",
-             FIRMWARE_VERSION,
-             timeBuf,
-             kSettingsBatteryStub,
-             static_cast<unsigned long>(kSettingsPhysicalRamK));
-    u8g2.drawStr(2, 13, headerLine2);
-    u8g2.drawHLine(0, 17, GUI::SCREEN_WIDTH);
+    char sdLeft[24];
+    if (isSDMounted()) {
+        const uint64_t totalMb = sdTotalBytes() / (1024 * 1024);
+        const uint64_t usedMb = sdUsedBytes() / (1024 * 1024);
+        snprintf(sdLeft, sizeof(sdLeft), "SD %llu/%lluM",
+                 static_cast<unsigned long long>(usedMb),
+                 static_cast<unsigned long long>(totalMb));
+    } else {
+        snprintf(sdLeft, sizeof(sdLeft), "SD --/--M");
+    }
+
+    char statusRight[24];
+    snprintf(statusRight, sizeof(statusRight), "v%s %s", FIRMWARE_VERSION, timeBuf);
+    drawInfoRow(20, sdLeft, statusRight);
+    u8g2.drawHLine(0, 24, GUI::SCREEN_WIDTH);
 }
 
 void SettingsApp::renderSettingsList() {
@@ -505,9 +529,9 @@ void SettingsApp::renderSettingsList() {
     u8g2.setFont(u8g2_font_5x8_tr);
 
     const int totalItems = SETTING_COUNT;
-    const int maxVisible = 5;
+    const int maxVisible = 4;
     const int lineHeight = 8;
-    const int listTop = 24;
+    const int listTop = 31;
 
     int scrollOff = 0;
     if (selectedIndex >= maxVisible) {

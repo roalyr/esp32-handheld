@@ -19,6 +19,8 @@ extern T9EditorApp appT9Editor;
 // External sleep control (defined in main.cpp)
 extern bool sleepEnabled;
 
+static const char* kSettingsBatteryStub = "BAT --.-V";
+
 // Helper to get readable name for special keys
 static const char* getKeyName(char key) {
     switch(key) {
@@ -282,25 +284,15 @@ void SettingsApp::handleInput(char key) {
             if (selectedIndex >= SETTING_COUNT) selectedIndex = 0;
         }
         if (key == KEY_ENTER) {
-            if (selectedIndex == SETTING_KEY_TESTER) {
-                inKeyTester = true;
-                lastPressedKey = ' ';
-                for (int i = 0; i < HISTORY_SIZE; i++) keyHistory[i] = ' ';
-            } else if (selectedIndex == SETTING_SD_REMOUNT) {
+            if (selectedIndex == SETTING_SD_REMOUNT) {
                 unmountSD();
                 GUI::showToast("Checking SDcard", 450);
                 sdRemountPending = true;
                 sdRemountDeadline = millis() + 450;
-            } else if (selectedIndex == SETTING_T9_EDITOR) {
-                appTransferAction = ACTION_CREATE_FILE;
-                appTransferPath = "";
-                appTransferString = "";
-                appTransferLabel = "T9 EDITOR";
-                appTransferBool = false;
-                appTransferEditorMode = APP_TRANSFER_EDITOR_READ_WRITE;
-                appTransferSourceKind = APP_TRANSFER_SOURCE_BUFFER;
-                appTransferCaller = this;
-                switchApp(&appT9Editor);
+            } else if (selectedIndex == SETTING_KEY_TESTER) {
+                inKeyTester = true;
+                lastPressedKey = ' ';
+                for (int i = 0; i < HISTORY_SIZE; i++) keyHistory[i] = ' ';
             } else if (selectedIndex == SETTING_LCD_TEST) {
                 inLcdTest = true;
                 lcdTestStep = 0;
@@ -317,13 +309,6 @@ void SettingsApp::handleInput(char key) {
             if (selectedIndex == SETTING_BRIGHTNESS) {
                 systemBrightness = tempBrightness;
                 ledcWrite(0, systemBrightness);
-            }
-            if (selectedIndex == SETTING_CONTRAST) {
-                systemContrast = tempContrast;
-                u8g2.setContrast(systemContrast);
-            }
-            if (selectedIndex == SETTING_SLEEP) {
-                sleepEnabled = tempSleepEnabled;
             }
             if (selectedIndex == SETTING_RO_PAGE_SIZE) {
                 setT9EditorReadOnlyPageSizeOptionIndex(tempReadOnlyPageSizeIndex);
@@ -343,25 +328,6 @@ void SettingsApp::handleInput(char key) {
             }
         }
 
-        if (selectedIndex == SETTING_CONTRAST) {
-            if (key == KEY_RIGHT) {
-                tempContrast += 5;
-                if (tempContrast > 255) tempContrast = 255;
-                u8g2.setContrast(tempContrast);
-            }
-            if (key == KEY_LEFT) {
-                tempContrast -= 5;
-                if (tempContrast < 0) tempContrast = 0;
-                u8g2.setContrast(tempContrast);
-            }
-        }
-        
-        if (selectedIndex == SETTING_SLEEP) {
-            if (key == KEY_LEFT || key == KEY_RIGHT) {
-                tempSleepEnabled = !tempSleepEnabled;
-            }
-        }
-
         if (selectedIndex == SETTING_RO_PAGE_SIZE) {
             if (key == KEY_LEFT || key == KEY_RIGHT) {
                 int nextIndex = tempReadOnlyPageSizeIndex;
@@ -378,64 +344,69 @@ void SettingsApp::handleInput(char key) {
 }
 
 void SettingsApp::renderInfoHeader() {
-    // Header: "Settings  vX.X.X  HH:MM"
+    u8g2.drawBox(0, 0, GUI::SCREEN_WIDTH, GUI::SCREEN_HEIGHT);
+    u8g2.setDrawColor(0);
+    u8g2.setFont(GUI::FONT_TINY);
+
+    const uint32_t totalRamK = ESP.getHeapSize() / 1024;
+    const uint32_t freeRamK = ESP.getFreeHeap() / 1024;
+    const uint32_t usedRamK = totalRamK >= freeRamK ? totalRamK - freeRamK : 0;
+
+    char headerLine1[48];
+    if (isSDMounted()) {
+        const uint64_t totalMb = sdTotalBytes() / (1024 * 1024);
+        const uint64_t usedMb = sdUsedBytes() / (1024 * 1024);
+        snprintf(headerLine1, sizeof(headerLine1), "RAM %lu/%luk SD %llu/%lluM",
+                 static_cast<unsigned long>(usedRamK),
+                 static_cast<unsigned long>(totalRamK),
+                 static_cast<unsigned long long>(usedMb),
+                 static_cast<unsigned long long>(totalMb));
+    } else {
+        snprintf(headerLine1, sizeof(headerLine1), "RAM %lu/%luk SD --/--M",
+                 static_cast<unsigned long>(usedRamK),
+                 static_cast<unsigned long>(totalRamK));
+    }
+    u8g2.drawStr(2, 6, headerLine1);
+
     char timeBuf[8];
     SystemClock::getTimeString(timeBuf, sizeof(timeBuf));
-    
-    char headerBuf[40];
-    snprintf(headerBuf, sizeof(headerBuf), "v%s %s", FIRMWARE_VERSION, timeBuf);
-    
-    GUI::drawHeader("Settings", headerBuf);
+
+    char headerLine2[40];
+    snprintf(headerLine2, sizeof(headerLine2), "v%s %s %s", FIRMWARE_VERSION, timeBuf, kSettingsBatteryStub);
+    u8g2.drawStr(2, 13, headerLine2);
+    u8g2.drawHLine(0, 17, GUI::SCREEN_WIDTH);
 }
 
 void SettingsApp::renderSettingsList() {
     renderInfoHeader();
-    GUI::setFontSmall();
-    
-    // Total items: SETTING_COUNT selectable + 1 info line
-    const int totalItems = SETTING_COUNT + 1;  // +1 for info line
-    const int maxVisible = 4;  // Content area fits 4 lines
-    
-    // Calculate scroll offset to keep selection visible
+    u8g2.setFont(u8g2_font_5x8_tr);
+
+    const int totalItems = SETTING_COUNT;
+    const int maxVisible = 5;
+    const int lineHeight = 8;
+    const int listTop = 24;
+
     int scrollOff = 0;
     if (selectedIndex >= maxVisible) {
         scrollOff = selectedIndex - maxVisible + 1;
-    }
-    // When at last selectable item, scroll one more to show info line
-    if (selectedIndex == SETTING_COUNT - 1 && scrollOff < totalItems - maxVisible) {
-        scrollOff = totalItems - maxVisible;
     }
     if (scrollOff < 0) scrollOff = 0;
 
     for (int vis = 0; vis < maxVisible && (scrollOff + vis) < totalItems; vis++) {
         int idx = scrollOff + vis;
-        int y = GUI::CONTENT_START_Y + vis * GUI::LINE_HEIGHT;
+        int y = listTop + vis * lineHeight;
         bool isSelected = (idx == selectedIndex);
         char buf[40];
 
-        // Info line is at index SETTING_COUNT (not selectable)
-        if (idx == SETTING_COUNT) {
-            int freeRamK = ESP.getFreeHeap() / 1024;
-            if (isSDMounted()) {
-                uint64_t totalMB = sdTotalBytes() / (1024*1024);
-                uint64_t freeMB = (sdTotalBytes() - sdUsedBytes()) / (1024*1024);
-                snprintf(buf, sizeof(buf), "RAM %dk SD %lluM free", freeRamK, (unsigned long long)freeMB);
-            } else {
-                snprintf(buf, sizeof(buf), "RAM %dk SD:none", freeRamK);
-            }
-            u8g2.drawStr(2, y, buf);
-            continue;
-        }
-
-        // Draw selection highlight for non-edit items
-        bool highlightSel = isSelected && !editMode;
-        // For edit-mode items, highlight only when not editing
-        if (highlightSel) {
-            u8g2.drawBox(0, y - 8, GUI::SCREEN_WIDTH - 4, GUI::LINE_HEIGHT);
-            u8g2.setDrawColor(0);
+        if (isSelected) {
+            u8g2.drawBox(0, y - 7, 123, lineHeight);
+            u8g2.setDrawColor(1);
         }
 
         switch ((SettingItem)idx) {
+        case SETTING_SD_REMOUNT:
+            snprintf(buf, sizeof(buf), "(Re)mount SD card");
+            break;
         case SETTING_BRIGHTNESS: {
             int pct = (tempBrightness * 100) / 255;
             if (editMode && isSelected)
@@ -444,60 +415,43 @@ void SettingsApp::renderSettingsList() {
                 snprintf(buf, sizeof(buf), "Backlight: %d%%", pct);
             break;
         }
-        case SETTING_CONTRAST:
-            if (editMode && isSelected)
-                snprintf(buf, sizeof(buf), "Contrast: <%d>", tempContrast);
-            else
-                snprintf(buf, sizeof(buf), "Contrast: %d", tempContrast);
-            break;
-        case SETTING_SLEEP:
-            if (editMode && isSelected)
-                snprintf(buf, sizeof(buf), "Sleep: <%s>", tempSleepEnabled ? "ON" : "OFF");
-            else
-                snprintf(buf, sizeof(buf), "Sleep: %s", tempSleepEnabled ? "ON" : "OFF");
-            break;
         case SETTING_RO_PAGE_SIZE: {
             const size_t pageBytes = getT9EditorReadOnlyPageSizeOption(tempReadOnlyPageSizeIndex);
             if (editMode && isSelected)
-                snprintf(buf, sizeof(buf), "RO page: <%uB>", static_cast<unsigned>(pageBytes));
+                snprintf(buf, sizeof(buf), "Reader page: <%uB>", static_cast<unsigned>(pageBytes));
             else
-                snprintf(buf, sizeof(buf), "RO page: %uB", static_cast<unsigned>(pageBytes));
+                snprintf(buf, sizeof(buf), "Reader page: %uB", static_cast<unsigned>(pageBytes));
             break;
         }
-        case SETTING_SD_REMOUNT:
-            snprintf(buf, sizeof(buf), "(Re)mount SD card");
-            break;
         case SETTING_KEY_TESTER:
-            snprintf(buf, sizeof(buf), "Key Tester...");
-            break;
-        case SETTING_T9_EDITOR:
-            snprintf(buf, sizeof(buf), "T9 Editor...");
+            snprintf(buf, sizeof(buf), "Key tester");
             break;
         case SETTING_LCD_TEST:
-            snprintf(buf, sizeof(buf), "LCD Test...");
+            snprintf(buf, sizeof(buf), "LCD tester");
             break;
         case SETTING_SD_TEST:
-            snprintf(buf, sizeof(buf), "SD Pin Test...");
+            snprintf(buf, sizeof(buf), "SD pin tester");
             break;
         default:
             buf[0] = '\0';
         }
 
         u8g2.drawStr(2, y, buf);
-        if (highlightSel) u8g2.setDrawColor(1);
+        if (isSelected) u8g2.setDrawColor(0);
     }
-    
-    // Scroll indicators (small triangles)
-    if (scrollOff > 0) {
-        int cx = 124;
-        int ty = GUI::CONTENT_START_Y - 9;
-        u8g2.drawTriangle(cx - 2, ty + 3, cx + 2, ty + 3, cx, ty);
+
+    if (totalItems > maxVisible) {
+        GUI::drawScrollbar(
+            GUI::SCREEN_WIDTH - GUI::SCROLLBAR_WIDTH - 1,
+            listTop - 7,
+            maxVisible * lineHeight,
+            totalItems,
+            maxVisible,
+            scrollOff
+        );
     }
-    if (scrollOff + maxVisible < totalItems) {
-        int cx = 124;
-        int by = GUI::CONTENT_START_Y + (maxVisible - 1) * GUI::LINE_HEIGHT + 2;
-        u8g2.drawTriangle(cx - 2, by, cx + 2, by, cx, by + 3);
-    }
+
+    u8g2.setDrawColor(1);
 }
 
 void SettingsApp::renderKeyTester() {
@@ -537,6 +491,7 @@ void SettingsApp::renderKeyTester() {
 }
 
 void SettingsApp::render() {
+    bool invertedMainList = false;
     if (inKeyTester) {
         renderKeyTester();
     } else if (inT9Editor) {
@@ -547,9 +502,16 @@ void SettingsApp::render() {
         renderSdTest();
     } else {
         renderSettingsList();
+        invertedMainList = true;
     }
 
-    GUI::updateToast();
+    if (invertedMainList) {
+        u8g2.setDrawColor(0);
+        GUI::updateToast();
+        u8g2.setDrawColor(1);
+    } else {
+        GUI::updateToast();
+    }
 }
 
 // --------------------------------------------------------------------------

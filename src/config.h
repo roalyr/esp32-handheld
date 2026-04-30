@@ -15,7 +15,7 @@
 // VERSION INFO
 // --------------------------------------------------------------------------
 
-#define FIRMWARE_VERSION "1.3"
+#define FIRMWARE_VERSION "1.4"
 #define FIRMWARE_NAME "ESP32 Handheld"
 
 // --------------------------------------------------------------------------

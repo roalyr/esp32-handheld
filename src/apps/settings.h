@@ -16,13 +16,10 @@ class SettingsApp : public App {
     enum T9ViewMode { VIEW_FULL, VIEW_FULL_LINENO, VIEW_MIN_LINENO, VIEW_MIN };
 
     enum SettingItem {
-        SETTING_BRIGHTNESS = 0,
-        SETTING_CONTRAST,
-        SETTING_SLEEP,
-        SETTING_RO_PAGE_SIZE,
-        SETTING_SD_REMOUNT,
+      SETTING_SD_REMOUNT = 0,
+      SETTING_BRIGHTNESS,
+      SETTING_RO_PAGE_SIZE,
         SETTING_KEY_TESTER,
-        SETTING_T9_EDITOR,
         SETTING_LCD_TEST,
         SETTING_SD_TEST,
         SETTING_COUNT

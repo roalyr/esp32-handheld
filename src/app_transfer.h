@@ -1,9 +1,9 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/app_transfer.h
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TACTICAL_TODO TASK_2
-// LOG_REF: 2026-04-27
-// Description: Cross-app transfer area for editor/viewer launch state and prompt workflows.
+// TRUTH_LINK: TACTICAL_TODO TASK_1
+// LOG_REF: 2026-04-30
+// Description: Cross-app transfer area for buffer and paged editor/viewer launch state.
 
 #ifndef APP_TRANSFER_H
 #define APP_TRANSFER_H
@@ -33,7 +33,7 @@ enum AppTransferEditorOpenMode {
 enum AppTransferDocumentSourceKind {
     APP_TRANSFER_SOURCE_DEFAULT = 0,
     APP_TRANSFER_SOURCE_BUFFER = 1,
-    APP_TRANSFER_SOURCE_PAGED_PLACEHOLDER = 2
+    APP_TRANSFER_SOURCE_PAGED_FILE = 2
 };
 
 extern App* appTransferCaller;   // App to return to when operation completes

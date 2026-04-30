@@ -1,7 +1,7 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/lua_scripts.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TRUTH_HARDWARE.md Section 1, Section 2, Section 3; TACTICAL_TODO TASK_2
+// TRUTH_LINK: TRUTH_HARDWARE.md Section 1, Section 2, Section 3; TACTICAL_TODO TASK_1
 // LOG_REF: 2026-04-30
 
 #include "lua_scripts.h"
@@ -442,7 +442,7 @@ local host = {
     notice = nil,
     notice_until = 0,
     close_prompt_active = false,
-    close_prompt_leave = false,
+    close_prompt_selection = 1,
     crash_popup_active = false,
     crash_title = nil,
     crash_lines = {},
@@ -659,7 +659,7 @@ end
 
 function host:launch(descriptor)
     self.close_prompt_active = false
-    self.close_prompt_leave = false
+    self.close_prompt_selection = 1
     local runtime_descriptor = descriptor
     if not descriptor.built_in then
         local err
@@ -677,13 +677,13 @@ function host:launch(descriptor)
         self.launch_popup_until = 0
         return
     end
-    self.launch_popup_until = sys.millis() + 2000
+    self.launch_popup_until = sys.millis() + 1000
 end
 
 function host:close_current_app()
     local preserve_id = self.active_descriptor and self.active_descriptor.id or nil
     self.close_prompt_active = false
-    self.close_prompt_leave = false
+    self.close_prompt_selection = 1
     self.launch_popup_until = 0
     self.active_descriptor = nil
     self:refresh_catalog(preserve_id)
@@ -786,10 +786,10 @@ function host:draw()
         draw_notice(self.notice)
     end
     if self.launch_popup_until ~= 0 then
-        ui.message("App starting", "ALT:Exit")
+        ui.message("App starting", "A+ESC:Exit", false)
     end
     if self.close_prompt_active then
-        ui.confirm("Leave app?", self.close_prompt_leave)
+        ui.choice3("Leave app?", "No", "Leave", "Cancel", self.close_prompt_selection - 1)
     end
     if self.crash_popup_active then
         draw_crash_popup(self.crash_title or "App crash", self.crash_lines, self.crash_scroll)
@@ -798,15 +798,23 @@ function host:draw()
 end
 
 function host:handle_close_prompt_input(key)
-    if key == input.KEY_LEFT or key == input.KEY_RIGHT or key == input.KEY_UP or key == input.KEY_DOWN then
-        self.close_prompt_leave = not self.close_prompt_leave
+    if key == input.KEY_LEFT or key == input.KEY_UP then
+        self.close_prompt_selection = self.close_prompt_selection - 1
+        if self.close_prompt_selection < 1 then
+            self.close_prompt_selection = 3
+        end
+    elseif key == input.KEY_RIGHT or key == input.KEY_DOWN or key == input.KEY_TAB then
+        self.close_prompt_selection = self.close_prompt_selection + 1
+        if self.close_prompt_selection > 3 then
+            self.close_prompt_selection = 1
+        end
     elseif key == input.KEY_ENTER then
-        if self.close_prompt_leave then
+        if self.close_prompt_selection == 2 then
             self:close_current_app()
         else
             self.close_prompt_active = false
         end
-    elseif key == input.KEY_ALT or key == input.KEY_BKSP then
+    elseif key == input.KEY_ESC or key == input.KEY_BKSP then
         self.close_prompt_active = false
     end
 end
@@ -841,15 +849,15 @@ function host:input(key)
             return
         end
         if self.launch_popup_until ~= 0 then
-            if key == input.KEY_ALT then
+            if key == input.KEY_ESC and input.held(input.KEY_ALT) then
                 self.close_prompt_active = true
-                self.close_prompt_leave = false
+                self.close_prompt_selection = 1
             end
             return
         end
-        if key == input.KEY_ALT then
+        if key == input.KEY_ESC and input.held(input.KEY_ALT) then
             self.close_prompt_active = true
-            self.close_prompt_leave = false
+            self.close_prompt_selection = 1
             return
         end
         self:invoke(self.active_descriptor, "input", key)
@@ -866,7 +874,7 @@ function host:init()
     self.notice = nil
     self.notice_until = 0
     self.close_prompt_active = false
-    self.close_prompt_leave = false
+    self.close_prompt_selection = 1
     self.crash_popup_active = false
     self.crash_title = nil
     self.crash_lines = {}
@@ -992,18 +1000,24 @@ function file_browser:consume_editor_result()
         return
     end
 
+    if result.source_kind == "paged" then
+        self:refresh_current_path(result.path)
+        self:show_message("Saved successfully")
+        return
+    end
+
     local ok, err = fs.write(result.path, result.content)
     if not ok then
         if err == "SD not mounted" then
             self:show_message("No SD card mounted")
         else
-            self:show_toast(err or "Save failed", 2000)
+            self:show_toast("Failed to save", 2000)
         end
         return
     end
 
     self:refresh_current_path(result.path)
-    self:show_message("File saved")
+    self:show_message("Saved successfully")
 end
 
 function file_browser:update()
@@ -1057,10 +1071,18 @@ function file_browser:open_selected()
         self:load_path(entry.path)
         return
     end
-    local ok, err = ui.editFile(entry.path, entry.name)
+    local open_rw = input.held(input.KEY_ALT)
+    local ok, err
+    if open_rw then
+        ok, err = ui.editFile(entry.path, entry.name)
+    else
+        ok, err = ui.viewFile(entry.path, entry.name)
+    end
     if not ok then
         if err == "SD not mounted" then
             self:show_message("No SD card mounted")
+        elseif err == "File too large for RW" then
+            self:show_message("File too large for RW")
         else
             self:show_toast(err or "Open failed", 2000)
         end
@@ -1068,7 +1090,7 @@ function file_browser:open_selected()
 end
 
 function file_browser:handle_message_input(key)
-    if key == input.KEY_ENTER or key == input.KEY_BKSP or key == input.KEY_ALT
+    if key == input.KEY_ENTER or key == input.KEY_BKSP or key == input.KEY_ESC
         or key == input.KEY_LEFT or key == input.KEY_RIGHT
         or key == input.KEY_UP or key == input.KEY_DOWN then
         self:clear_message()
@@ -1093,21 +1115,21 @@ function file_browser:draw_full()
     ui.header("Files", path_tail(self.current_path, 10))
     self:ensure_visible(4)
     draw_file_list(self.entries, self.selected, self.scroll, 21, 4, 9, 18)
-    ui.footer("ENT:Open", "TAB:Mode")
+    ui.footer("ENT:RO", "A+ENT:RW")
 end
 
 function file_browser:draw_details()
     ui.header("Files", path_tail(self.current_path, 10))
     self:ensure_visible(4)
     draw_two_column_list(self.entries, self.selected, self.scroll, 21, 4, 9, 7, 46, 16, entry_size_type_text)
-    ui.footer("ENT:Open", "TAB:Mode")
+    ui.footer("ENT:RO", "A+ENT:RW")
 end
 
 function file_browser:draw_min()
     ui.header("Files", path_tail(self.current_path, 10))
     self:ensure_visible(4)
     draw_two_column_list(self.entries, self.selected, self.scroll, 21, 4, 9, 6, 44, 16, entry_modified_text)
-    ui.footer("ENT:Open", "TAB:Mode")
+    ui.footer("ENT:RO", "A+ENT:RW")
 end
 
 function file_browser:draw()

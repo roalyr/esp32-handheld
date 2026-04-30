@@ -1,9 +1,9 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/apps/t9_editor.h
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TACTICAL_TODO TASK_2
-// LOG_REF: 2026-04-27
-// Description: Canonical T9 editor/viewer app with read-only support and source seam.
+// TRUTH_LINK: TACTICAL_TODO TASK_1
+// LOG_REF: 2026-04-30
+// Description: Canonical T9 editor/viewer app with paged-file session support.
 
 #ifndef APP_T9_EDITOR_H
 #define APP_T9_EDITOR_H
@@ -34,7 +34,13 @@ enum EditorOpenMode {
 
 enum DocumentSourceKind {
   SOURCE_BUFFER,
-  SOURCE_PAGED_PLACEHOLDER
+  SOURCE_PAGED_FILE
+};
+
+enum PendingPagedAction {
+  PAGED_ACTION_NONE,
+  PAGED_ACTION_PREV_PAGE,
+  PAGED_ACTION_NEXT_PAGE
 };
 
 enum T9InputMode {
@@ -42,6 +48,17 @@ enum T9InputMode {
   MODE_ABC,
   MODE_123
 };
+
+static const size_t kT9EditorDefaultReadOnlyPageBytes = 512;
+static const size_t kT9EditorReadWriteMaxBytes = 16 * 1024;
+
+extern const size_t kT9EditorReadOnlyPageSizeOptions[];
+extern const int kT9EditorReadOnlyPageSizeOptionCount;
+
+size_t getT9EditorReadOnlyPageBytes();
+int getT9EditorReadOnlyPageSizeOptionIndex();
+size_t getT9EditorReadOnlyPageSizeOption(int index);
+bool setT9EditorReadOnlyPageSizeOptionIndex(int index);
 
 class T9EditorApp : public App {
   private:
@@ -51,9 +68,23 @@ class T9EditorApp : public App {
   EditorOpenMode openMode;
   DocumentSourceKind sourceKind;
   int sourcePageSize;
+  bool sessionExportDirty;
+  size_t sessionSourceSize;
   String documentLabel;
   String documentPath;
   String documentBuffer;
+  size_t pageStartOffset;
+  size_t pageOriginalLength;
+  size_t pagedDocumentSize;
+  int currentPageIndex;
+  int totalPageCount;
+  bool pageDirty;
+  String historyDocumentId;
+  unsigned long historyNextSnapshotId;
+  int nextClipboardSlot;
+  bool pagePromptActive;
+  int pagePromptSelection;
+  PendingPagedAction pendingPageAction;
 
   T9Predict t9predict;
   int cursorPos;
@@ -70,10 +101,53 @@ class T9EditorApp : public App {
   bool zeroPending;
   bool fallback;
   int fallbackStart;
+  bool selectionMode;
+  bool shiftTapPending;
 
   void resetEditorSession();
+  void resetPagedSession();
   String readDocumentSlice(int start, int length) const;
   int getDocumentLength() const;
+  void showReadWriteCapToast() const;
+  bool tryInsertTextAtCursor(const String& text, int cursorAdvance);
+  bool tryInsertCharWithAutoBracket(char c);
+  bool statPagedDocument(size_t& fileSize, String& error) const;
+  bool readFileRange(size_t start, size_t length, String& out, String& error) const;
+  bool loadPagedDocument(String& error);
+  bool loadPageByIndex(int pageIndex, String& error);
+  void updatePagedDocumentMetrics(size_t fileSize);
+  void markPageDirty();
+  bool saveCurrentPage(String& error);
+  bool ensureSessionWorkspace(String& error);
+  bool loadSessionManifest(String& error);
+  bool storeSessionManifest(String& error) const;
+  bool loadSessionChunk(int pageIndex, String& error);
+  bool writeSessionChunk(int pageIndex, const String& content, size_t documentLength, String& error);
+  bool exportPagedDocument(String& error);
+  bool ensureEditorStorage(String& error);
+  bool ensureHistoryDocument(String& error);
+  bool recordPageSnapshot(const char* reason, String& error);
+  bool loadClipboardState(String& error);
+  bool storeClipboardState(String& error);
+  bool writeClipboardSlot(const String& content, int& writtenSlot, String& error);
+  bool readClipboardSlot(int slot, String& content, String& error) const;
+  String getEditorSystemRoot() const;
+  String getWorkRoot() const;
+  String getHistoryRoot() const;
+  String getClipboardRoot() const;
+  String getSessionRoot() const;
+  String getSessionManifestPath() const;
+  String getSessionChunkRoot() const;
+  String getSessionChunkPath(int pageIndex) const;
+  String getDocumentHistoryRoot() const;
+  String getDocumentManifestPath() const;
+  String getClipboardManifestPath() const;
+  String getClipboardSlotPath(int slot) const;
+  String buildDefaultHistoryDocumentId() const;
+  bool hasPreviousPage() const;
+  bool hasNextPage() const;
+  void beginPendingPageAction(PendingPagedAction action);
+  void handlePagePromptInput(char key);
   bool isReadOnly() const;
   bool showHeader() const;
   bool showFooter() const;
@@ -85,6 +159,7 @@ class T9EditorApp : public App {
   String getPreviewText() const;
   String getDisplayText(String* previewOut = nullptr) const;
   void requestExit(bool saveRequested);
+  bool isKeyActiveNow(char key) const;
   String getMultiTapChar() const;
   void commitMultiTap();
   void commitPrediction();
@@ -94,6 +169,7 @@ class T9EditorApp : public App {
     void renderHeader();
   void renderFooter() const;
   void renderSavePrompt();
+  void renderPagePrompt();
 
   public:
     T9EditorApp();

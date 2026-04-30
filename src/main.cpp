@@ -36,6 +36,15 @@ static App* activeSettingsApp = nullptr;
 static bool returnToLuaOnAppExit = false;
 static bool suppressLuaInputUntilRelease = false;
 
+static bool isKeyActiveNow(char key) {
+    for (int i = 0; i < activeKeyCount; i++) {
+        if (activeKeys[i] == key) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void clearAppTransferState() {
     appTransferAction = ACTION_NONE;
     appTransferBool = false;
@@ -289,8 +298,11 @@ void loop() {
             return;
         }
         
+        const bool escJustPressed = isJustPressed(KEY_ESC);
+        const bool altEscChord = escJustPressed && isKeyActiveNow(KEY_ALT);
+
         // 3. ESC HANDLING (just-pressed only, before app/lua input)
-        if (isJustPressed(KEY_ESC)) {
+        if (escJustPressed && !altEscChord) {
             lastActivityTime = now;
             
             if (currentMode == MODE_LUA) {
@@ -336,7 +348,7 @@ void loop() {
                     // Forward keys to Lua (just-pressed + repeats for repeatable keys)
                     for (int i = 0; i < activeKeyCount; i++) {
                         char key = activeKeys[i];
-                        if (key != KEY_ESC) {
+                        if (key != KEY_ESC || altEscChord) {
                             bool shouldFire = isJustPressed(key) || isRepeating(key) || isLongPressed(key);
                             if (shouldFire) {
                                 lastActivityTime = now;

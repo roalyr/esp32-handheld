@@ -187,8 +187,17 @@ void drawYesNoDialog(const char* message, bool yesSelected);
  * Draw a centered informational dialog using the same popup chrome as confirmations.
  * @param message Message text
  * @param buttonLabel Label for the dismiss button
+ * @param invertButton If true, draw the button with inverted colors like the default prompt style
  */
-void drawMessageDialog(const char* message, const char* buttonLabel = "OK");
+void drawMessageDialog(const char* message, const char* buttonLabel = "OK", bool invertButton = true);
+
+/**
+ * Draw a centered three-option dialog using the standard popup chrome.
+ * @param message Prompt text
+ * @param labels Three button labels
+ * @param selectedIndex Selected button index [0..2]
+ */
+void drawThreeOptionDialog(const char* message, const char* const labels[3], int selectedIndex);
 
 // ==========================================================================
 // TOAST / TEMPORARY MESSAGES

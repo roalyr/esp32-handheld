@@ -74,7 +74,8 @@ static bool hasPendingLuaEditorResult() {
     return appTransferResultReady &&
            appTransferAction == ACTION_EDIT_FILE &&
            appTransferEditorMode == APP_TRANSFER_EDITOR_READ_WRITE &&
-           appTransferSourceKind == APP_TRANSFER_SOURCE_BUFFER &&
+           (appTransferSourceKind == APP_TRANSFER_SOURCE_BUFFER ||
+            appTransferSourceKind == APP_TRANSFER_SOURCE_PAGED_FILE) &&
            appTransferPath.length() > 0;
 }
 
@@ -128,6 +129,40 @@ static bool readSdTextFile(const String& path, String& content, String& error) {
         }
     }
 
+    error = "";
+    return true;
+}
+
+static bool statSdFilePath(const String& path, uint64_t& fileSize, String& error);
+
+static bool validateSdFilePath(const String& path, String& error) {
+    uint64_t ignoredSize = 0;
+    return statSdFilePath(path, ignoredSize, error);
+}
+
+static bool statSdFilePath(const String& path, uint64_t& fileSize, String& error) {
+    fileSize = 0;
+    if (!isSDMounted()) {
+        error = "SD not mounted";
+        return false;
+    }
+
+    SdSessionGuard session;
+    FsFile file;
+    if (!session.begin()) {
+        error = "Failed to open SD session";
+        return false;
+    }
+    if (!file.open(path.c_str(), O_RDONLY)) {
+        error = String("Failed to open file: ") + path;
+        return false;
+    }
+    if (file.isDir()) {
+        error = String("Path is a directory: ") + path;
+        return false;
+    }
+
+    fileSize = file.size();
     error = "";
     return true;
 }
@@ -714,7 +749,23 @@ static int lua_ui_confirm(lua_State* L) {
 static int lua_ui_message(lua_State* L) {
     const char* message = luaL_checkstring(L, 1);
     const char* buttonLabel = lua_isnoneornil(L, 2) ? "OK" : luaL_checkstring(L, 2);
-    GUI::drawMessageDialog(message, buttonLabel);
+    const bool invertButton = lua_isnoneornil(L, 3) ? true : lua_toboolean(L, 3);
+    GUI::drawMessageDialog(message, buttonLabel, invertButton);
+    return 0;
+}
+
+// ui.choice3(message, label0, label1, label2, selectedIndex) - Draw shared three-option dialog
+static int lua_ui_choice3(lua_State* L) {
+    const char* message = luaL_checkstring(L, 1);
+    const char* labels[3] = {
+        luaL_checkstring(L, 2),
+        luaL_checkstring(L, 3),
+        luaL_checkstring(L, 4)
+    };
+    int selectedIndex = luaL_checkinteger(L, 5);
+    if (selectedIndex < 0) selectedIndex = 0;
+    if (selectedIndex > 2) selectedIndex = 2;
+    GUI::drawThreeOptionDialog(message, labels, selectedIndex);
     return 0;
 }
 
@@ -722,20 +773,19 @@ static int lua_ui_viewFile(lua_State* L) {
     String path = normalizeFsPath(luaL_checkstring(L, 1));
     const char* label = lua_isnoneornil(L, 2) ? nullptr : luaL_checkstring(L, 2);
 
-    String content;
     String error;
-    if (!readSdTextFile(path, content, error)) {
+    if (!validateSdFilePath(path, error)) {
         return pushLuaResultError(L, error);
     }
 
     appTransferAction = ACTION_VIEW_FILE;
     appTransferBool = false;
     appTransferResultReady = false;
-    appTransferString = content;
+    appTransferString = "";
     appTransferPath = path;
     appTransferLabel = label ? String(label) : path;
     appTransferEditorMode = APP_TRANSFER_EDITOR_READ_ONLY;
-    appTransferSourceKind = APP_TRANSFER_SOURCE_BUFFER;
+    appTransferSourceKind = APP_TRANSFER_SOURCE_PAGED_FILE;
     appTransferCaller = nullptr;
 
     launchLuaOwnedApp(&appT9Editor);
@@ -748,20 +798,23 @@ static int lua_ui_editFile(lua_State* L) {
     String path = normalizeFsPath(luaL_checkstring(L, 1));
     const char* label = lua_isnoneornil(L, 2) ? nullptr : luaL_checkstring(L, 2);
 
-    String content;
     String error;
-    if (!readSdTextFile(path, content, error)) {
+    uint64_t fileSize = 0;
+    if (!statSdFilePath(path, fileSize, error)) {
         return pushLuaResultError(L, error);
+    }
+    if (fileSize > static_cast<uint64_t>(kT9EditorReadWriteMaxBytes)) {
+        return pushLuaResultError(L, "File too large for RW");
     }
 
     appTransferAction = ACTION_EDIT_FILE;
     appTransferBool = false;
     appTransferResultReady = false;
-    appTransferString = content;
+    appTransferString = "";
     appTransferPath = path;
     appTransferLabel = label ? String(label) : path;
     appTransferEditorMode = APP_TRANSFER_EDITOR_READ_WRITE;
-    appTransferSourceKind = APP_TRANSFER_SOURCE_BUFFER;
+    appTransferSourceKind = APP_TRANSFER_SOURCE_PAGED_FILE;
     appTransferCaller = nullptr;
 
     launchLuaOwnedApp(&appT9Editor);
@@ -795,6 +848,10 @@ static int lua_ui_takeEditorResult(lua_State* L) {
     lua_pushlstring(L, appTransferLabel.c_str(), appTransferLabel.length());
     lua_setfield(L, -2, "label");
 
+    lua_pushstring(L,
+                   appTransferSourceKind == APP_TRANSFER_SOURCE_PAGED_FILE ? "paged" : "buffer");
+    lua_setfield(L, -2, "source_kind");
+
     lua_pushlstring(L, appTransferString.c_str(), appTransferString.length());
     lua_setfield(L, -2, "content");
 
@@ -808,6 +865,7 @@ static void registerUiModule(lua_State* L) {
         {"footer", lua_ui_footer},
         {"confirm", lua_ui_confirm},
         {"message", lua_ui_message},
+        {"choice3", lua_ui_choice3},
         {"viewFile", lua_ui_viewFile},
         {"editFile", lua_ui_editFile},
         {"takeEditorResult", lua_ui_takeEditorResult},

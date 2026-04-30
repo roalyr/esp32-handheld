@@ -19,7 +19,8 @@ class SettingsApp : public App {
         SETTING_BRIGHTNESS = 0,
         SETTING_CONTRAST,
         SETTING_SLEEP,
-      SETTING_SD_REMOUNT,
+        SETTING_RO_PAGE_SIZE,
+        SETTING_SD_REMOUNT,
         SETTING_KEY_TESTER,
         SETTING_T9_EDITOR,
         SETTING_LCD_TEST,
@@ -42,6 +43,7 @@ class SettingsApp : public App {
     int tempBrightness;
     int tempContrast;
     bool tempSleepEnabled;
+    int tempReadOnlyPageSizeIndex;
 
     // Key tester state
     char lastPressedKey;

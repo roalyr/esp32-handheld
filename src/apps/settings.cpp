@@ -137,6 +137,7 @@ SettingsApp::SettingsApp() {
     tempBrightness = systemBrightness;
     tempContrast = systemContrast;
     tempSleepEnabled = SLEEP_ENABLED;
+    tempReadOnlyPageSizeIndex = getT9EditorReadOnlyPageSizeOptionIndex();
     lastPressedKey = ' ';
     for (int i = 0; i < HISTORY_SIZE; i++) keyHistory[i] = ' ';
     keyHistory[HISTORY_SIZE] = '\0';
@@ -154,6 +155,7 @@ void SettingsApp::start() {
     tempBrightness = systemBrightness;
     tempContrast = systemContrast;
     tempSleepEnabled = sleepEnabled;
+    tempReadOnlyPageSizeIndex = getT9EditorReadOnlyPageSizeOptionIndex();
     editMode = false;
     inKeyTester = false;
     inT9Editor = false;
@@ -170,6 +172,7 @@ void SettingsApp::stop() {
     systemBrightness = tempBrightness;
     systemContrast = tempContrast;
     sleepEnabled = tempSleepEnabled;
+    setT9EditorReadOnlyPageSizeOptionIndex(tempReadOnlyPageSizeIndex);
     inKeyTester = false;
     inT9Editor = false;
     inLcdTest = false;
@@ -322,6 +325,9 @@ void SettingsApp::handleInput(char key) {
             if (selectedIndex == SETTING_SLEEP) {
                 sleepEnabled = tempSleepEnabled;
             }
+            if (selectedIndex == SETTING_RO_PAGE_SIZE) {
+                setT9EditorReadOnlyPageSizeOptionIndex(tempReadOnlyPageSizeIndex);
+            }
         }
         
         if (selectedIndex == SETTING_BRIGHTNESS) {
@@ -353,6 +359,19 @@ void SettingsApp::handleInput(char key) {
         if (selectedIndex == SETTING_SLEEP) {
             if (key == KEY_LEFT || key == KEY_RIGHT) {
                 tempSleepEnabled = !tempSleepEnabled;
+            }
+        }
+
+        if (selectedIndex == SETTING_RO_PAGE_SIZE) {
+            if (key == KEY_LEFT || key == KEY_RIGHT) {
+                int nextIndex = tempReadOnlyPageSizeIndex;
+                if (key == KEY_LEFT) nextIndex--;
+                else nextIndex++;
+
+                if (nextIndex < 0) nextIndex = kT9EditorReadOnlyPageSizeOptionCount - 1;
+                if (nextIndex >= kT9EditorReadOnlyPageSizeOptionCount) nextIndex = 0;
+
+                tempReadOnlyPageSizeIndex = nextIndex;
             }
         }
     }
@@ -437,6 +456,14 @@ void SettingsApp::renderSettingsList() {
             else
                 snprintf(buf, sizeof(buf), "Sleep: %s", tempSleepEnabled ? "ON" : "OFF");
             break;
+        case SETTING_RO_PAGE_SIZE: {
+            const size_t pageBytes = getT9EditorReadOnlyPageSizeOption(tempReadOnlyPageSizeIndex);
+            if (editMode && isSelected)
+                snprintf(buf, sizeof(buf), "RO page: <%uB>", static_cast<unsigned>(pageBytes));
+            else
+                snprintf(buf, sizeof(buf), "RO page: %uB", static_cast<unsigned>(pageBytes));
+            break;
+        }
         case SETTING_SD_REMOUNT:
             snprintf(buf, sizeof(buf), "(Re)mount SD card");
             break;

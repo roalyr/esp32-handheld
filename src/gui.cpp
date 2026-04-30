@@ -276,7 +276,7 @@ void drawYesNoDialog(const char* message, bool yesSelected) {
     u8g2.setDrawColor(1);
 }
 
-void drawMessageDialog(const char* message, const char* buttonLabel) {
+void drawMessageDialog(const char* message, const char* buttonLabel, bool invertButton) {
     drawPopupFrame(10, 12, 108, 40, true);
 
     u8g2.setFont(FONT_SMALL);
@@ -292,12 +292,41 @@ void drawMessageDialog(const char* message, const char* buttonLabel) {
     }
     const int buttonX = (SCREEN_WIDTH - buttonWidth) / 2;
 
-    u8g2.drawBox(buttonX, buttonY - 8, buttonWidth, LINE_HEIGHT);
-    u8g2.setDrawColor(0);
+    if (invertButton) {
+        u8g2.drawBox(buttonX, buttonY - 8, buttonWidth, LINE_HEIGHT);
+        u8g2.setDrawColor(0);
+    } else {
+        u8g2.drawFrame(buttonX, buttonY - 8, buttonWidth, LINE_HEIGHT);
+        u8g2.setDrawColor(1);
+    }
     int labelWidth = u8g2.getStrWidth(label);
     int labelX = buttonX + (buttonWidth - labelWidth) / 2;
     u8g2.drawStr(labelX, buttonY, label);
     u8g2.setDrawColor(1);
+}
+
+void drawThreeOptionDialog(const char* message, const char* const labels[3], int selectedIndex) {
+    drawPopupFrame(6, 10, 116, 44, true);
+
+    u8g2.setFont(FONT_SMALL);
+    int msgWidth = u8g2.getStrWidth(message);
+    int msgX = (SCREEN_WIDTH - msgWidth) / 2;
+    u8g2.drawStr(msgX, 24, message);
+
+    const int buttonY = 41;
+    const int buttonWidth = 30;
+    const int buttonXs[3] = {10, 48, 86};
+    for (int i = 0; i < 3; i++) {
+        const char* label = labels[i] ? labels[i] : "";
+        if (selectedIndex == i) {
+            u8g2.drawBox(buttonXs[i], buttonY - 8, buttonWidth, LINE_HEIGHT);
+            u8g2.setDrawColor(0);
+        }
+        int labelWidth = u8g2.getStrWidth(label);
+        int labelX = buttonXs[i] + (buttonWidth - labelWidth) / 2;
+        u8g2.drawStr(labelX, buttonY, label);
+        u8g2.setDrawColor(1);
+    }
 }
 
 // ==========================================================================

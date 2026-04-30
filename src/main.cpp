@@ -33,6 +33,17 @@ static SystemMode currentMode = MODE_LUA;
 static bool luaError = false;
 static String luaErrorMsg = "";
 static App* activeSettingsApp = nullptr;
+static bool returnToLuaOnAppExit = false;
+
+static void clearAppTransferState() {
+    appTransferAction = ACTION_NONE;
+    appTransferBool = false;
+    appTransferString = "";
+    appTransferPath = "";
+    appTransferEditorMode = APP_TRANSFER_EDITOR_DEFAULT;
+    appTransferSourceKind = APP_TRANSFER_SOURCE_DEFAULT;
+    appTransferLabel = "";
+}
 
 void switchApp(App* newApp) {
     if (newApp == nullptr || newApp == activeSettingsApp) {
@@ -48,6 +59,20 @@ void switchApp(App* newApp) {
     if (newApp != &appSettings || previousApp == nullptr) {
         newApp->start();
     }
+}
+
+void launchLuaOwnedApp(App* newApp) {
+    if (newApp == nullptr) {
+        return;
+    }
+
+    if (currentMode == MODE_LUA) {
+        currentMode = MODE_SETTINGS;
+        activeSettingsApp = nullptr;
+        returnToLuaOnAppExit = true;
+    }
+
+    switchApp(newApp);
 }
 
 // Timing Control
@@ -329,18 +354,20 @@ void loop() {
                 settingsApp->update();
                 if (settingsApp == &appT9Editor && appT9Editor.exitRequested) {
                     appT9Editor.exitRequested = false;
+                    bool shouldReturnToLua = returnToLuaOnAppExit;
+                    returnToLuaOnAppExit = false;
                     App* returnApp = (appTransferCaller != nullptr) ? appTransferCaller : static_cast<App*>(&appSettings);
                     appTransferCaller = nullptr;
-                    if (returnApp == &appSettings) {
-                        appTransferAction = ACTION_NONE;
-                        appTransferBool = false;
-                        appTransferString = "";
-                        appTransferPath = "";
-                        appTransferEditorMode = APP_TRANSFER_EDITOR_DEFAULT;
-                        appTransferSourceKind = APP_TRANSFER_SOURCE_DEFAULT;
-                        appTransferLabel = "";
+                    if (shouldReturnToLua || returnApp == &appSettings) {
+                        clearAppTransferState();
                     }
-                    switchApp(returnApp);
+                    if (shouldReturnToLua) {
+                        appT9Editor.stop();
+                        activeSettingsApp = nullptr;
+                        currentMode = MODE_LUA;
+                    } else {
+                        switchApp(returnApp);
+                    }
                 }
             }
         }

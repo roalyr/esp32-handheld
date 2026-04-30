@@ -1,5 +1,8 @@
-// [Revision: v1.0] [Path: src/app_control.h] [Date: 2025-12-10]
-// Description: Declaration for global app switch helper used by apps.
+// PROJECT: ESP32-S2-Mini handheld terminal
+// MODULE: src/app_control.h
+// STATUS: [Level 2 - Implementation]
+// TRUTH_LINK: TACTICAL_TODO TASK_1
+// LOG_REF: 2026-04-28
 
 #ifndef APP_CONTROL_H
 #define APP_CONTROL_H
@@ -8,5 +11,6 @@
 
 // Implemented in main.cpp
 void switchApp(App* newApp);
+void launchLuaOwnedApp(App* newApp);
 
 #endif

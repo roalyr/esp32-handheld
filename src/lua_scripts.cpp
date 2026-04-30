@@ -863,6 +863,20 @@ function file_browser:show_toast(message, duration_ms)
     self.toast_until = sys.millis() + (duration_ms or 1500)
 end
 
+function file_browser:show_message(message, button_label)
+    self.toast = nil
+    self.toast_until = 0
+    self.message_active = true
+    self.message_text = message
+    self.message_button = button_label or "OK"
+end
+
+function file_browser:clear_message()
+    self.message_active = false
+    self.message_text = nil
+    self.message_button = nil
+end
+
 function file_browser:load_path(path)
     local listed_entries, err = fs.list(path)
     self.current_path = path
@@ -882,7 +896,11 @@ function file_browser:load_path(path)
     if not listed_entries then
         self.selected = #self.entries > 0 and 1 or 0
         self.scroll = 1
-        self:show_toast(err or "SD browse error", 2000)
+        if err == "SD not mounted" then
+            self:show_message("No SD card mounted")
+        else
+            self:show_toast(err or "SD browse error", 2000)
+        end
         return
     end
 
@@ -927,6 +945,9 @@ function file_browser:init()
     self.view_mode = FILE_VIEW_FULL
     self.toast = nil
     self.toast_until = 0
+    self.message_active = false
+    self.message_text = nil
+    self.message_button = nil
     self.selection_memory = {}
     self:load_path("/")
 end
@@ -958,7 +979,7 @@ end
 
 function file_browser:go_parent()
     if self.current_path == "/" then
-        self:show_toast("At root", 1000)
+        self:show_message("Already at root")
         return
     end
     local parent = parent_path(self.current_path)
@@ -981,7 +1002,22 @@ function file_browser:open_selected()
         self:load_path(entry.path)
         return
     end
-    self:show_toast("Open stub: " .. truncate(entry.name, 11), 1600)
+    local ok, err = ui.viewFile(entry.path, entry.name)
+    if not ok then
+        if err == "SD not mounted" then
+            self:show_message("No SD card mounted")
+        else
+            self:show_toast(err or "Open failed", 2000)
+        end
+    end
+end
+
+function file_browser:handle_message_input(key)
+    if key == input.KEY_ENTER or key == input.KEY_BKSP or key == input.KEY_ALT
+        or key == input.KEY_LEFT or key == input.KEY_RIGHT
+        or key == input.KEY_UP or key == input.KEY_DOWN then
+        self:clear_message()
+    end
 end
 
 function file_browser:detail_line()
@@ -1031,9 +1067,17 @@ function file_browser:draw()
     if self.toast then
         draw_notice(self.toast)
     end
+    if self.message_active then
+        ui.message(self.message_text, self.message_button)
+    end
 end
 
 function file_browser:input(key)
+    if self.message_active then
+        self:handle_message_input(key)
+        return
+    end
+
     if key == input.KEY_TAB then
         self.view_mode = self.view_mode + 1
         if self.view_mode > FILE_VIEW_MIN then

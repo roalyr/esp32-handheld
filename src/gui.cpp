@@ -1,5 +1,8 @@
-// [Revision: v1.0] [Path: src/gui.cpp] [Date: 2025-12-11]
-// Description: Implementation of unified GUI module.
+// PROJECT: ESP32-S2-Mini handheld terminal
+// MODULE: src/gui.cpp
+// STATUS: [Level 2 - Implementation]
+// TRUTH_LINK: TACTICAL_TODO TASK_2
+// LOG_REF: 2026-04-30
 
 #include "gui.h"
 #include "hal.h"
@@ -270,6 +273,30 @@ void drawYesNoDialog(const char* message, bool yesSelected) {
         u8g2.setDrawColor(0);
     }
     u8g2.drawStr(noX + 9, buttonY, "NO");
+    u8g2.setDrawColor(1);
+}
+
+void drawMessageDialog(const char* message, const char* buttonLabel) {
+    drawPopupFrame(10, 12, 108, 40, true);
+
+    u8g2.setFont(FONT_SMALL);
+    int msgWidth = u8g2.getStrWidth(message);
+    int msgX = (SCREEN_WIDTH - msgWidth) / 2;
+    u8g2.drawStr(msgX, 28, message);
+
+    const char* label = (buttonLabel != nullptr && buttonLabel[0] != '\0') ? buttonLabel : "OK";
+    const int buttonY = 44;
+    int buttonWidth = u8g2.getStrWidth(label) + 12;
+    if (buttonWidth < 30) {
+        buttonWidth = 30;
+    }
+    const int buttonX = (SCREEN_WIDTH - buttonWidth) / 2;
+
+    u8g2.drawBox(buttonX, buttonY - 8, buttonWidth, LINE_HEIGHT);
+    u8g2.setDrawColor(0);
+    int labelWidth = u8g2.getStrWidth(label);
+    int labelX = buttonX + (buttonWidth - labelWidth) / 2;
+    u8g2.drawStr(labelX, buttonY, label);
     u8g2.setDrawColor(1);
 }
 

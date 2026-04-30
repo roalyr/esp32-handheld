@@ -1,6 +1,8 @@
-// [Revision: v1.0] [Path: src/gui.h] [Date: 2025-12-11]
-// Description: Unified GUI module for consistent UI components across all apps.
-//              Provides reusable headers, footers, lists, popups, and navigation helpers.
+// PROJECT: ESP32-S2-Mini handheld terminal
+// MODULE: src/gui.h
+// STATUS: [Level 2 - Implementation]
+// TRUTH_LINK: TACTICAL_TODO TASK_2
+// LOG_REF: 2026-04-30
 
 #ifndef GUI_H
 #define GUI_H
@@ -180,6 +182,13 @@ void drawContextMenu(const char* const* items, int itemCount, int selectedIndex,
  * @param yesSelected If true, YES is highlighted
  */
 void drawYesNoDialog(const char* message, bool yesSelected);
+
+/**
+ * Draw a centered informational dialog using the same popup chrome as confirmations.
+ * @param message Message text
+ * @param buttonLabel Label for the dismiss button
+ */
+void drawMessageDialog(const char* message, const char* buttonLabel = "OK");
 
 // ==========================================================================
 // TOAST / TEMPORARY MESSAGES

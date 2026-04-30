@@ -9,8 +9,13 @@
 #include "config.h"
 #include "clock.h"
 #include "gui.h"
+#include "app_control.h"
+#include "app_transfer.h"
+#include "apps/t9_editor.h"
 #include "t9_engine.h"
 #include <lua.hpp>
+
+extern T9EditorApp appT9Editor;
 
 namespace LuaVM {
 
@@ -51,6 +56,60 @@ static int pushLuaResultError(lua_State* L, const String& message) {
     lua_pushnil(L);
     lua_pushlstring(L, message.c_str(), message.length());
     return 2;
+}
+
+static bool readSdTextFile(const String& path, String& content, String& error) {
+    if (!isSDMounted()) {
+        error = "SD not mounted";
+        return false;
+    }
+
+    SdSessionGuard session;
+    FsFile file;
+    if (!session.begin()) {
+        error = "Failed to open SD session";
+        return false;
+    }
+    if (!file.open(path.c_str(), O_RDONLY)) {
+        error = String("Failed to open file: ") + path;
+        return false;
+    }
+    if (file.isDir()) {
+        error = String("Path is a directory: ") + path;
+        return false;
+    }
+
+    uint64_t fileSize = file.size();
+    if (fileSize > 262144ULL) {
+        error = String("File too large for Lua read: ") + path;
+        return false;
+    }
+
+    content = "";
+    if (fileSize > 0 && !content.reserve(static_cast<unsigned int>(fileSize))) {
+        error = String("Not enough memory to read file: ") + path;
+        return false;
+    }
+
+    char buffer[129];
+    while (true) {
+        int bytesRead = file.read(buffer, sizeof(buffer) - 1);
+        if (bytesRead < 0) {
+            error = String("Failed to read file: ") + path;
+            return false;
+        }
+        if (bytesRead == 0) {
+            break;
+        }
+        buffer[bytesRead] = '\0';
+        if (!content.concat(buffer)) {
+            error = String("Failed to append file data: ") + path;
+            return false;
+        }
+    }
+
+    error = "";
+    return true;
 }
 
 static String normalizeFsPath(const char* rawPath) {
@@ -516,45 +575,10 @@ static int lua_fs_list(lua_State* L) {
 // fs.read(path) - Read an entire text file into a Lua string
 static int lua_fs_read(lua_State* L) {
     String path = normalizeFsPath(luaL_checkstring(L, 1));
-    if (!isSDMounted()) {
-        return pushLuaResultError(L, "SD not mounted");
-    }
-
-    SdSessionGuard session;
-    FsFile file;
-    if (!session.begin()) {
-        return pushLuaResultError(L, "Failed to open SD session");
-    }
-    if (!file.open(path.c_str(), O_RDONLY)) {
-        return pushLuaResultError(L, String("Failed to open file: ") + path);
-    }
-    if (file.isDir()) {
-        return pushLuaResultError(L, String("Path is a directory: ") + path);
-    }
-
-    uint64_t fileSize = file.size();
-    if (fileSize > 262144ULL) {
-        return pushLuaResultError(L, String("File too large for Lua read: ") + path);
-    }
-
     String content;
-    if (fileSize > 0 && !content.reserve(static_cast<unsigned int>(fileSize))) {
-        return pushLuaResultError(L, String("Not enough memory to read file: ") + path);
-    }
-
-    char buffer[129];
-    while (true) {
-        int bytesRead = file.read(buffer, sizeof(buffer) - 1);
-        if (bytesRead < 0) {
-            return pushLuaResultError(L, String("Failed to read file: ") + path);
-        }
-        if (bytesRead == 0) {
-            break;
-        }
-        buffer[bytesRead] = '\0';
-        if (!content.concat(buffer)) {
-            return pushLuaResultError(L, String("Failed to append file data: ") + path);
-        }
+    String error;
+    if (!readSdTextFile(path, content, error)) {
+        return pushLuaResultError(L, error);
     }
 
     lua_pushlstring(L, content.c_str(), content.length());
@@ -600,11 +624,46 @@ static int lua_ui_confirm(lua_State* L) {
     return 0;
 }
 
+// ui.message(message, buttonLabel) - Draw shared informational dialog
+static int lua_ui_message(lua_State* L) {
+    const char* message = luaL_checkstring(L, 1);
+    const char* buttonLabel = lua_isnoneornil(L, 2) ? "OK" : luaL_checkstring(L, 2);
+    GUI::drawMessageDialog(message, buttonLabel);
+    return 0;
+}
+
+static int lua_ui_viewFile(lua_State* L) {
+    String path = normalizeFsPath(luaL_checkstring(L, 1));
+    const char* label = lua_isnoneornil(L, 2) ? nullptr : luaL_checkstring(L, 2);
+
+    String content;
+    String error;
+    if (!readSdTextFile(path, content, error)) {
+        return pushLuaResultError(L, error);
+    }
+
+    appTransferAction = ACTION_VIEW_FILE;
+    appTransferBool = false;
+    appTransferString = content;
+    appTransferPath = path;
+    appTransferLabel = label ? String(label) : path;
+    appTransferEditorMode = APP_TRANSFER_EDITOR_READ_ONLY;
+    appTransferSourceKind = APP_TRANSFER_SOURCE_BUFFER;
+    appTransferCaller = nullptr;
+
+    launchLuaOwnedApp(&appT9Editor);
+
+    lua_pushboolean(L, true);
+    return 1;
+}
+
 static void registerUiModule(lua_State* L) {
     static const luaL_Reg ui_funcs[] = {
         {"header", lua_ui_header},
         {"footer", lua_ui_footer},
         {"confirm", lua_ui_confirm},
+        {"message", lua_ui_message},
+        {"viewFile", lua_ui_viewFile},
         {NULL, NULL}
     };
 

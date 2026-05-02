@@ -49,6 +49,12 @@ class SettingsApp : public App {
     static const int HISTORY_SIZE = 14;
     char keyHistory[HISTORY_SIZE + 1];
     void addToHistory(char c);
+    void resetKeyTesterSession();
+    uint32_t keyTesterPollBaseline;
+    uint32_t keyTesterRawHitBaseline;
+    uint32_t keyTesterLatchedBaseline;
+    uint32_t keyTesterDuplicateBaseline;
+    uint32_t keyTesterDeliveredCount;
 
     // T9 editor state
     T9Predict t9predict;

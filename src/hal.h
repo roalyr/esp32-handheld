@@ -64,5 +64,11 @@ bool isJustPressed(char key);
 bool isRepeating(char key);
 bool isKeyHeld(char key);
 bool isLongPressed(char key);     // Returns true on repeat interval for held repeatable keys
+uint32_t getMatrixPollCount();
+uint32_t getMatrixRawHitCount();
+uint32_t getMatrixLatchedHitCount();
+uint32_t getMatrixDuplicateHitCount();
+uint16_t getMatrixSettleDelayUs();
+void setMatrixSettleDelayUs(uint16_t delayUs);
 
 #endif

@@ -26,6 +26,37 @@ static const uint32_t kSettingsPhysicalRamK = 320;
 
 namespace {
 
+static const uint16_t kKeyTesterSettleDelayPresetsUs[] = {10, 25, 50, 100, 200, 400};
+
+static bool isHeldNow(char key) {
+    for (int i = 0; i < activeKeyCount; i++) {
+        if (activeKeys[i] == key) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint16_t nextKeyTesterSettleDelayUs(uint16_t current) {
+    const size_t presetCount = sizeof(kKeyTesterSettleDelayPresetsUs) / sizeof(kKeyTesterSettleDelayPresetsUs[0]);
+    for (size_t index = 0; index < presetCount; index++) {
+        if (kKeyTesterSettleDelayPresetsUs[index] > current) {
+            return kKeyTesterSettleDelayPresetsUs[index];
+        }
+    }
+    return kKeyTesterSettleDelayPresetsUs[0];
+}
+
+static uint16_t prevKeyTesterSettleDelayUs(uint16_t current) {
+    const size_t presetCount = sizeof(kKeyTesterSettleDelayPresetsUs) / sizeof(kKeyTesterSettleDelayPresetsUs[0]);
+    for (size_t index = presetCount; index-- > 0;) {
+        if (kKeyTesterSettleDelayPresetsUs[index] < current) {
+            return kKeyTesterSettleDelayPresetsUs[index];
+        }
+    }
+    return kKeyTesterSettleDelayPresetsUs[presetCount - 1];
+}
+
 struct SettingsSdSessionGuard {
     bool active = false;
 
@@ -147,6 +178,22 @@ static const char* getKeyName(char key) {
     }
 }
 
+static char getKeyHistoryToken(char key) {
+    switch (key) {
+        case KEY_ESC:   return 'E';
+        case KEY_BKSP:  return 'B';
+        case KEY_TAB:   return 'T';
+        case KEY_ENTER: return 'N';
+        case KEY_SHIFT: return 'S';
+        case KEY_ALT:   return 'A';
+        case KEY_UP:    return 'U';
+        case KEY_DOWN:  return 'D';
+        case KEY_LEFT:  return 'L';
+        case KEY_RIGHT: return 'R';
+        default:        return key;
+    }
+}
+
 // Multi-tap character maps (same layout as t9_engine.cpp)
 static const char* multiTapMap[] = {
     " 0",        // 0
@@ -258,6 +305,11 @@ SettingsApp::SettingsApp() {
     sdTestRan = false;
     sdRemountPending = false;
     sdRemountDeadline = 0;
+    keyTesterPollBaseline = 0;
+    keyTesterRawHitBaseline = 0;
+    keyTesterLatchedBaseline = 0;
+    keyTesterDuplicateBaseline = 0;
+    keyTesterDeliveredCount = 0;
     sdTestLineCount = 0;
     t9EditorReset();
 }
@@ -336,7 +388,17 @@ void SettingsApp::update() {
 
 void SettingsApp::addToHistory(char c) {
     for (int i = 0; i < HISTORY_SIZE - 1; i++) keyHistory[i] = keyHistory[i + 1];
-    keyHistory[HISTORY_SIZE - 1] = c;
+    keyHistory[HISTORY_SIZE - 1] = getKeyHistoryToken(c);
+}
+
+void SettingsApp::resetKeyTesterSession() {
+    lastPressedKey = ' ';
+    for (int i = 0; i < HISTORY_SIZE; i++) keyHistory[i] = ' ';
+    keyTesterPollBaseline = getMatrixPollCount();
+    keyTesterRawHitBaseline = getMatrixRawHitCount();
+    keyTesterLatchedBaseline = getMatrixLatchedHitCount();
+    keyTesterDuplicateBaseline = getMatrixDuplicateHitCount();
+    keyTesterDeliveredCount = 0;
 }
 
 void SettingsApp::handleInput(char key) {
@@ -347,8 +409,15 @@ void SettingsApp::handleInput(char key) {
     if (inKeyTester) {
         if (key == KEY_ESC) {
             inKeyTester = false;
+        } else if (isHeldNow(KEY_ALT) && key == KEY_LEFT) {
+            setMatrixSettleDelayUs(prevKeyTesterSettleDelayUs(getMatrixSettleDelayUs()));
+        } else if (isHeldNow(KEY_ALT) && key == KEY_RIGHT) {
+            setMatrixSettleDelayUs(nextKeyTesterSettleDelayUs(getMatrixSettleDelayUs()));
+        } else if (isHeldNow(KEY_ALT) && key == KEY_ENTER) {
+            resetKeyTesterSession();
         } else {
             lastPressedKey = key;
+            keyTesterDeliveredCount++;
             addToHistory(key);
         }
         return;
@@ -408,8 +477,7 @@ void SettingsApp::handleInput(char key) {
                 }
             } else if (selectedIndex == SETTING_KEY_TESTER) {
                 inKeyTester = true;
-                lastPressedKey = ' ';
-                for (int i = 0; i < HISTORY_SIZE; i++) keyHistory[i] = ' ';
+                resetKeyTesterSession();
             } else if (selectedIndex == SETTING_LCD_TEST) {
                 inLcdTest = true;
                 lcdTestStep = 0;
@@ -610,37 +678,61 @@ void SettingsApp::renderSettingsList() {
 void SettingsApp::renderKeyTester() {
     GUI::drawHeader("KEY TESTER");
     GUI::setFontSmall();
-    
-    // Last Key Display
-    u8g2.drawUTF8(0, 24, "LAST:");
+
+    char lastBuf[8] = "-";
     if (lastPressedKey != ' ') {
         const char* name = getKeyName(lastPressedKey);
         if (name) {
-            u8g2.setFont(u8g2_font_ncenB14_tr);
-            u8g2.drawStr(35, 38, name);
+            snprintf(lastBuf, sizeof(lastBuf), "%s", name);
+        } else if (lastPressedKey >= 32 && lastPressedKey <= 126) {
+            snprintf(lastBuf, sizeof(lastBuf), "[%c]", lastPressedKey);
         } else {
-            u8g2.setFont(u8g2_font_inr24_t_cyrillic);
-            char keyStr[2] = {lastPressedKey, '\0'};
-            u8g2.drawUTF8(50, 42, keyStr);
+            snprintf(lastBuf, sizeof(lastBuf), "0x%02X", static_cast<unsigned char>(lastPressedKey));
         }
     }
-    
-    // Currently Held Keys
-    GUI::setFontSmall();
-    u8g2.drawUTF8(0, 55, "HELD:");
+
+    char lineBuf[32];
+    snprintf(lineBuf, sizeof(lineBuf), "LAST:%s", lastBuf);
+    u8g2.drawStr(0, 16, lineBuf);
+
+    snprintf(lineBuf, sizeof(lineBuf), "EVT:%s", keyHistory);
+    u8g2.drawStr(0, 24, lineBuf);
+
+    const uint32_t rawDelta = getMatrixRawHitCount() - keyTesterRawHitBaseline;
+    const uint32_t latchedDelta = getMatrixLatchedHitCount() - keyTesterLatchedBaseline;
+    const uint32_t duplicateDelta = getMatrixDuplicateHitCount() - keyTesterDuplicateBaseline;
+    const uint32_t pollDelta = getMatrixPollCount() - keyTesterPollBaseline;
+
+    snprintf(lineBuf, sizeof(lineBuf), "RAW:%lu LAT:%lu",
+             static_cast<unsigned long>(rawDelta),
+             static_cast<unsigned long>(latchedDelta));
+    u8g2.drawStr(0, 32, lineBuf);
+
+    snprintf(lineBuf, sizeof(lineBuf), "DUP:%lu IN:%lu",
+             static_cast<unsigned long>(duplicateDelta),
+             static_cast<unsigned long>(keyTesterDeliveredCount));
+    u8g2.drawStr(0, 40, lineBuf);
+
+    snprintf(lineBuf, sizeof(lineBuf), "SET:%uus P:%lu",
+             static_cast<unsigned>(getMatrixSettleDelayUs()),
+             static_cast<unsigned long>(pollDelta));
+    u8g2.drawStr(0, 48, lineBuf);
+
+    u8g2.drawStr(0, 56, "A+L/R:set A+E:rst");
+
     int xPos = 28;
+    u8g2.drawUTF8(0, 63, "HLD:");
     for (int i = 0; i < activeKeyCount; i++) {
         const char* name = getKeyName(activeKeys[i]);
         if (name) {
-            u8g2.drawStr(xPos, 55, name);
+            u8g2.drawStr(xPos, 63, name);
             xPos += u8g2.getStrWidth(name) + 3;
         } else {
             char buf[4] = {'[', activeKeys[i], ']', '\0'};
-            u8g2.drawStr(xPos, 55, buf);
+            u8g2.drawStr(xPos, 63, buf);
             xPos += 15;
         }
     }
-    
 }
 
 void SettingsApp::render() {

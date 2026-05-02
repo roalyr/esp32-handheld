@@ -64,6 +64,12 @@ int activeKeyCount = 0;
 char prevActiveKeys[MAX_PRESSED_KEYS];
 int prevKeyCount = 0;
 
+static uint16_t matrixSettleDelayUs = 50;
+static uint32_t matrixPollCount = 0;
+static uint32_t matrixRawHitCount = 0;
+static uint32_t matrixLatchedHitCount = 0;
+static uint32_t matrixDuplicateHitCount = 0;
+
 // Inter-frame key latching: accumulates presses between frames
 static char latchedKeys[MAX_PRESSED_KEYS];
 static int latchedKeyCount = 0;
@@ -203,10 +209,14 @@ uint64_t sdUsedBytes() {
 // Add a key to the latched set if not already present
 static void latchKey(char key) {
     for (int i = 0; i < latchedKeyCount; i++) {
-        if (latchedKeys[i] == key) return;
+        if (latchedKeys[i] == key) {
+            matrixDuplicateHitCount++;
+            return;
+        }
     }
     if (latchedKeyCount < MAX_PRESSED_KEYS) {
         latchedKeys[latchedKeyCount++] = key;
+        matrixLatchedHitCount++;
     }
 }
 
@@ -214,13 +224,16 @@ static void latchKey(char key) {
 // Detected keys are OR'd into the latch; they persist until the next
 // frame-level scanMatrix() consumes them.
 void pollMatrix() {
+    matrixPollCount++;
+
     for (int c = 0; c < COLS; c++) {
         pinMode(colPins[c], OUTPUT);
         digitalWrite(colPins[c], LOW);
-        delayMicroseconds(50);
+        delayMicroseconds(matrixSettleDelayUs);
 
         for (int r = 0; r < ROWS; r++) {
             if (digitalRead(rowPins[r]) == LOW) {
+                matrixRawHitCount++;
                 latchKey(keyMap[r][c]);
             }
         }
@@ -425,4 +438,33 @@ bool isLongPressed(char key) {
         }
     }
     return false;
+}
+
+uint32_t getMatrixPollCount() {
+    return matrixPollCount;
+}
+
+uint32_t getMatrixRawHitCount() {
+    return matrixRawHitCount;
+}
+
+uint32_t getMatrixLatchedHitCount() {
+    return matrixLatchedHitCount;
+}
+
+uint32_t getMatrixDuplicateHitCount() {
+    return matrixDuplicateHitCount;
+}
+
+uint16_t getMatrixSettleDelayUs() {
+    return matrixSettleDelayUs;
+}
+
+void setMatrixSettleDelayUs(uint16_t delayUs) {
+    if (delayUs < 10) {
+        delayUs = 10;
+    } else if (delayUs > 500) {
+        delayUs = 500;
+    }
+    matrixSettleDelayUs = delayUs;
 }

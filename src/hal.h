@@ -61,6 +61,8 @@ void setupHardware();
 void scanMatrix();              // Frame-level: finalize latched keys, update prev state
 void pollMatrix();              // Inter-frame: lightweight scan, latches detected keys
 bool isJustPressed(char key);
+bool hasKeyPressEventThisFrame();
+bool popKeyPressEvent(char& key);
 bool isRepeating(char key);
 bool isKeyHeld(char key);
 bool isLongPressed(char key);     // Returns true on repeat interval for held repeatable keys

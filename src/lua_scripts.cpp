@@ -441,6 +441,9 @@ local host = {
     active_descriptor = nil,
     notice = nil,
     notice_until = 0,
+    input_block_until_release = false,
+    desktop_enter_armed = true,
+    last_input_ms = 0,
     close_prompt_active = false,
     close_prompt_selection = 1,
     crash_popup_active = false,
@@ -660,6 +663,7 @@ end
 function host:launch(descriptor)
     self.close_prompt_active = false
     self.close_prompt_selection = 1
+    self.desktop_enter_armed = false
     local runtime_descriptor = descriptor
     if not descriptor.built_in then
         local err
@@ -677,7 +681,12 @@ function host:launch(descriptor)
         self.launch_popup_until = 0
         return
     end
-    self.launch_popup_until = sys.millis() + 1000
+
+    if runtime_descriptor.built_in then
+        self.launch_popup_until = 0
+    else
+        self.launch_popup_until = sys.millis() + 350
+    end
 end
 
 function host:close_current_app()
@@ -685,6 +694,8 @@ function host:close_current_app()
     self.close_prompt_active = false
     self.close_prompt_selection = 1
     self.launch_popup_until = 0
+    self.input_block_until_release = true
+    self.desktop_enter_armed = false
     self.active_descriptor = nil
     self:refresh_catalog(preserve_id)
 end
@@ -756,6 +767,18 @@ end
 function host:update()
     self.marquee_tick = self.marquee_tick + 1
     self:update_notice()
+
+    if not input.held(input.KEY_ENTER) then
+        self.desktop_enter_armed = true
+    end
+
+    if self.input_block_until_release then
+        local held_keys = input.getKeys()
+        if #held_keys == 0 then
+            self.input_block_until_release = false
+        end
+    end
+
     if self.launch_popup_until ~= 0 and sys.millis() >= self.launch_popup_until then
         self.launch_popup_until = 0
     end
@@ -763,7 +786,8 @@ function host:update()
         self:invoke(self.active_descriptor, "update")
     else
         local now = sys.millis()
-        if now - self.last_catalog_poll >= self.catalog_poll_interval then
+        if now - self.last_catalog_poll >= self.catalog_poll_interval
+            and now - self.last_input_ms >= 500 then
             local preserve_id = self.apps[self.selected_index] and self.apps[self.selected_index].id or nil
             self:refresh_catalog(preserve_id)
         end
@@ -833,15 +857,26 @@ function host:desktop_input(key)
     elseif key == input.KEY_DOWN and self.selected_index + GRID_COLS <= #self.apps then
         self.selected_index = self.selected_index + GRID_COLS
     elseif key == input.KEY_ENTER then
+        if not self.desktop_enter_armed then
+            return
+        end
+        self.desktop_enter_armed = false
         self:launch(self.apps[self.selected_index])
     end
 end
 
 function host:input(key)
     if self.crash_popup_active then
+        self.last_input_ms = sys.millis()
         self:handle_crash_popup_input(key)
         return
     end
+
+    if self.input_block_until_release then
+        return
+    end
+
+    self.last_input_ms = sys.millis()
 
     if self.active_descriptor then
         if self.close_prompt_active then
@@ -873,6 +908,9 @@ function host:init()
     self.active_descriptor = nil
     self.notice = nil
     self.notice_until = 0
+    self.input_block_until_release = false
+    self.desktop_enter_armed = true
+    self.last_input_ms = 0
     self.close_prompt_active = false
     self.close_prompt_selection = 1
     self.crash_popup_active = false

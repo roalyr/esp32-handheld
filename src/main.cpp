@@ -341,18 +341,31 @@ void loop() {
                     }
                 } else {
                     if (suppressLuaInputUntilRelease) {
+                        char ignoredKey;
+                        while (popKeyPressEvent(ignoredKey)) {}
                         if (activeKeyCount == 0) {
                             suppressLuaInputUntilRelease = false;
                         }
                     } else {
-                    // Forward keys to Lua (just-pressed + repeats for repeatable keys)
-                    for (int i = 0; i < activeKeyCount; i++) {
-                        char key = activeKeys[i];
+                    // Forward queued presses to Lua in order, then held repeats.
+                    char key = '\0';
+                    while (!luaError && popKeyPressEvent(key)) {
                         if (key != KEY_ESC || altEscChord) {
-                            bool shouldFire = isJustPressed(key) || isRepeating(key) || isLongPressed(key);
+                            lastActivityTime = now;
+                            if (!LuaVM::callInputHandler(key)) {
+                                luaError = true;
+                                luaErrorMsg = LuaVM::getLastError();
+                            }
+                        }
+                    }
+
+                    for (int i = 0; !luaError && i < activeKeyCount; i++) {
+                        char heldKey = activeKeys[i];
+                        if (heldKey != KEY_ESC || altEscChord) {
+                            bool shouldFire = isRepeating(heldKey) || isLongPressed(heldKey);
                             if (shouldFire) {
                                 lastActivityTime = now;
-                                if (!LuaVM::callInputHandler(key)) {
+                                if (!LuaVM::callInputHandler(heldKey)) {
                                     luaError = true;
                                     luaErrorMsg = LuaVM::getLastError();
                                 }
@@ -361,6 +374,11 @@ void loop() {
                     }
                     }
                     
+                    // Lua surfaces spend more time in script update/draw than the
+                    // C++ settings path. Poll once more before _update so fast
+                    // taps that happen during Lua-side work have a shorter blind window.
+                    pollMatrix();
+
                     // Frame update
                     if (!luaError) {
                         if (!LuaVM::callGlobalFunction("_update")) {
@@ -371,14 +389,21 @@ void loop() {
                 }
             } else if (currentMode == MODE_SETTINGS) {
                 App* settingsApp = (activeSettingsApp != nullptr) ? activeSettingsApp : static_cast<App*>(&appSettings);
-                // Forward non-ESC input to settings (including repeats)
-                for (int i = 0; i < activeKeyCount; i++) {
-                    char key = activeKeys[i];
+                char key = '\0';
+                while (popKeyPressEvent(key)) {
                     if (key != KEY_ESC) {
-                        bool shouldFire = isJustPressed(key) || isRepeating(key) || isLongPressed(key);
+                        lastActivityTime = now;
+                        settingsApp->handleInput(key);
+                    }
+                }
+
+                for (int i = 0; i < activeKeyCount; i++) {
+                    char heldKey = activeKeys[i];
+                    if (heldKey != KEY_ESC) {
+                        bool shouldFire = isRepeating(heldKey) || isLongPressed(heldKey);
                         if (shouldFire) {
                             lastActivityTime = now;
-                            settingsApp->handleInput(key);
+                            settingsApp->handleInput(heldKey);
                         }
                     }
                 }
@@ -411,6 +436,7 @@ void loop() {
             if (luaError) {
                 renderLuaError();
             } else {
+                pollMatrix();
                 // Lua _draw() owns gfx.clear()/gfx.send() — no wrapping needed
                 if (!LuaVM::callGlobalFunction("_draw")) {
                     luaError = true;

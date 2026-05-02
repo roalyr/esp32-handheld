@@ -458,14 +458,7 @@ static int lua_input_held(lua_State* L) {
 
 // input.anyPressed() - Check if any key was just pressed
 static int lua_input_anyPressed(lua_State* L) {
-    // Check if any key transitioned from not pressed to pressed
-    for (int i = 0; i < activeKeyCount; i++) {
-        if (isJustPressed(activeKeys[i])) {
-            lua_pushboolean(L, true);
-            return 1;
-        }
-    }
-    lua_pushboolean(L, false);
+    lua_pushboolean(L, hasKeyPressEventThisFrame());
     return 1;
 }
 

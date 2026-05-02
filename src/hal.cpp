@@ -64,15 +64,27 @@ int activeKeyCount = 0;
 char prevActiveKeys[MAX_PRESSED_KEYS];
 int prevKeyCount = 0;
 
+struct MatrixKeyState {
+    bool pressed;
+};
+
+static MatrixKeyState keyStates[ROWS][COLS];
+
 static uint16_t matrixSettleDelayUs = 50;
 static uint32_t matrixPollCount = 0;
 static uint32_t matrixRawHitCount = 0;
 static uint32_t matrixLatchedHitCount = 0;
 static uint32_t matrixDuplicateHitCount = 0;
 
-// Inter-frame key latching: accumulates presses between frames
-static char latchedKeys[MAX_PRESSED_KEYS];
-static int latchedKeyCount = 0;
+static const uint8_t KEY_EVENT_QUEUE_CAPACITY = 24;
+static char queuedPressEvents[KEY_EVENT_QUEUE_CAPACITY];
+static uint8_t queuedPressHead = 0;
+static uint8_t queuedPressTail = 0;
+static uint8_t queuedPressCount = 0;
+
+static char framePressEvents[KEY_EVENT_QUEUE_CAPACITY];
+static uint8_t framePressCount = 0;
+static uint8_t framePressReadIndex = 0;
 
 // Key repeat state tracking
 struct KeyRepeatState {
@@ -206,25 +218,54 @@ uint64_t sdUsedBytes() {
 // MATRIX SCANNING LOGIC
 // --------------------------------------------------------------------------
 
-// Add a key to the latched set if not already present
-static void latchKey(char key) {
-    for (int i = 0; i < latchedKeyCount; i++) {
-        if (latchedKeys[i] == key) {
-            matrixDuplicateHitCount++;
-            return;
+static void enqueuePressEvent(char key) {
+    if (queuedPressCount >= KEY_EVENT_QUEUE_CAPACITY) {
+        return;
+    }
+
+    queuedPressEvents[queuedPressTail] = key;
+    queuedPressTail = (queuedPressTail + 1) % KEY_EVENT_QUEUE_CAPACITY;
+    queuedPressCount++;
+    matrixLatchedHitCount++;
+}
+
+static void refreshActiveKeysFromMatrixState() {
+    activeKeyCount = 0;
+    for (int r = 0; r < ROWS; r++) {
+        for (int c = 0; c < COLS; c++) {
+            if (!keyStates[r][c].pressed) {
+                continue;
+            }
+
+            if (activeKeyCount < MAX_PRESSED_KEYS) {
+                activeKeys[activeKeyCount++] = keyMap[r][c];
+            }
         }
     }
-    if (latchedKeyCount < MAX_PRESSED_KEYS) {
-        latchedKeys[latchedKeyCount++] = key;
-        matrixLatchedHitCount++;
+}
+
+static void finalizeFramePressEvents() {
+    framePressCount = 0;
+    framePressReadIndex = 0;
+
+    while (queuedPressCount > 0 && framePressCount < KEY_EVENT_QUEUE_CAPACITY) {
+        framePressEvents[framePressCount++] = queuedPressEvents[queuedPressHead];
+        queuedPressHead = (queuedPressHead + 1) % KEY_EVENT_QUEUE_CAPACITY;
+        queuedPressCount--;
+    }
+
+    if (queuedPressCount == 0) {
+        queuedPressHead = 0;
+        queuedPressTail = 0;
     }
 }
 
 // Lightweight scan — call between frames to catch brief key presses.
-// Detected keys are OR'd into the latch; they persist until the next
-// frame-level scanMatrix() consumes them.
+// Distinct press edges are queued in order; held state is tracked separately.
 void pollMatrix() {
     matrixPollCount++;
+
+    bool pressedNow[ROWS][COLS] = {};
 
     for (int c = 0; c < COLS; c++) {
         pinMode(colPins[c], OUTPUT);
@@ -233,16 +274,31 @@ void pollMatrix() {
 
         for (int r = 0; r < ROWS; r++) {
             if (digitalRead(rowPins[r]) == LOW) {
+                pressedNow[r][c] = true;
                 matrixRawHitCount++;
-                latchKey(keyMap[r][c]);
             }
         }
         pinMode(colPins[c], INPUT);
     }
+
+    for (int r = 0; r < ROWS; r++) {
+        for (int c = 0; c < COLS; c++) {
+            MatrixKeyState& state = keyStates[r][c];
+            if (pressedNow[r][c]) {
+                if (!state.pressed) {
+                    enqueuePressEvent(keyMap[r][c]);
+                } else {
+                    matrixDuplicateHitCount++;
+                }
+            }
+
+            state.pressed = pressedNow[r][c];
+        }
+    }
 }
 
-// Frame-level scan — call once per frame. Copies latched keys to activeKeys,
-// updates previous-frame state, then resets the latch.
+// Frame-level scan — call once per frame. Freezes the queued press events for
+// this frame and refreshes the currently held key snapshot.
 void scanMatrix() {
   prevKeyCount = activeKeyCount;
   memcpy(prevActiveKeys, activeKeys, sizeof(activeKeys));
@@ -250,12 +306,8 @@ void scanMatrix() {
   // Do one final hardware scan to include keys pressed right now
   pollMatrix();
 
-  // Copy latch → activeKeys
-  activeKeyCount = latchedKeyCount;
-  memcpy(activeKeys, latchedKeys, latchedKeyCount);
-
-  // Reset latch for next inter-frame period
-  latchedKeyCount = 0;
+  refreshActiveKeysFromMatrixState();
+  finalizeFramePressEvents();
 
   // Update repeat states once per frame (must run here, not inside
   // isRepeating(), because short-circuit evaluation of
@@ -265,19 +317,25 @@ void scanMatrix() {
 }
 
 bool isJustPressed(char key) {
-  bool currentlyPressed = false;
-  for(int i=0; i<activeKeyCount; i++) {
-    if(activeKeys[i] == key) { 
-        currentlyPressed = true;
-        break; 
+    for (int i = 0; i < framePressCount; i++) {
+        if (framePressEvents[i] == key) {
+                return true;
     }
   }
-  if (!currentlyPressed) return false;
+    return false;
+}
 
-  for(int i=0; i<prevKeyCount; i++) {
-    if(prevActiveKeys[i] == key) return false; 
-  }
-  return true;
+bool hasKeyPressEventThisFrame() {
+        return framePressCount > 0;
+}
+
+bool popKeyPressEvent(char& key) {
+        if (framePressReadIndex >= framePressCount) {
+                return false;
+        }
+
+        key = framePressEvents[framePressReadIndex++];
+        return true;
 }
 
 // --------------------------------------------------------------------------

@@ -766,6 +766,13 @@ static int lua_ui_footer(lua_State* L) {
     return 0;
 }
 
+// ui.footerCentered(text) - Draw standard centered footer text
+static int lua_ui_footerCentered(lua_State* L) {
+    const char* text = luaL_checkstring(L, 1);
+    GUI::drawFooter(text);
+    return 0;
+}
+
 // ui.confirm(message, yesSelected) - Draw shared yes/no confirmation dialog
 static int lua_ui_confirm(lua_State* L) {
     const char* message = luaL_checkstring(L, 1);
@@ -892,6 +899,7 @@ static void registerUiModule(lua_State* L) {
     static const luaL_Reg ui_funcs[] = {
         {"header", lua_ui_header},
         {"footer", lua_ui_footer},
+        {"footerCentered", lua_ui_footerCentered},
         {"confirm", lua_ui_confirm},
         {"message", lua_ui_message},
         {"choice3", lua_ui_choice3},

@@ -137,6 +137,7 @@ CUSTOM MODULE: ui
 =================
 - ui.header(title, rightText)
 - ui.footer(leftHint, rightHint)
+- ui.footerCentered(text)
 - ui.confirm(message, yesSelected)
  Draws the shared yes/no prompt.
 - ui.message(message, buttonLabel, invertButton)
@@ -155,6 +156,7 @@ CUSTOM MODULE: ui
 Example:
  ui.header("Files", "1/8")
  ui.footer("ENT:Open", "ESC:Back")
+ ui.footerCentered("BKSP:Close")
 
 CUSTOM MODULE: t9
 =================

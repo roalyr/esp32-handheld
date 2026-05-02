@@ -33,6 +33,11 @@ local FONT_MEDIUM = 1
 local FONT_LARGE = 2
 local FONT_TINY = 3
 
+local CRASH_WRAP_WIDTH = 29
+local CRASH_LINE_HEIGHT = 6
+local CRASH_BODY_BASELINE_Y = 20
+local CRASH_VISIBLE_LINES = 6
+
 local unpack_fn = unpack or table.unpack
 
 local FILE_BROWSER_ICON = {
@@ -49,6 +54,19 @@ local FILE_BROWSER_ICON = {
     "##                      ##",
     " ######################## ",
     "  ######################  "
+}
+
+local TRANSITION_KEY_GRACE_MS = 60
+local MODAL_KEYS = {
+    input.KEY_ENTER,
+    input.KEY_ESC,
+    input.KEY_BKSP,
+    input.KEY_ALT,
+    input.KEY_LEFT,
+    input.KEY_RIGHT,
+    input.KEY_UP,
+    input.KEY_DOWN,
+    input.KEY_TAB
 }
 
 local function clamp(value, low, high)
@@ -312,43 +330,41 @@ local function wrap_text_lines(text, width)
 end
 
 local function draw_crash_popup(title, lines, scroll)
-    local popup_x = 4
-    local popup_y = 4
-    local popup_w = 120
-    local popup_h = 56
-    local body_y = popup_y + 16
-    local visible_lines = 6
-
     gfx.setColor(0)
-    gfx.fillRect(popup_x, popup_y, popup_w, popup_h)
+    gfx.fillRect(0, 0, 128, 64)
     gfx.setColor(1)
-    gfx.rect(popup_x, popup_y, popup_w, popup_h)
+
+    local end_index = math.min(#lines, scroll + CRASH_VISIBLE_LINES - 1)
+    local right_text = nil
+    if #lines > CRASH_VISIBLE_LINES then
+        right_text = string.format("%d/%d", end_index, #lines)
+    end
+
+    ui.header(truncate(title, 16), right_text)
     gfx.setFont(FONT_SMALL)
-    gfx.text(popup_x + 4, popup_y + 8, truncate(title, 18))
-    gfx.line(popup_x + 1, popup_y + 10, popup_x + popup_w - 2, popup_y + 10)
     gfx.setFont(FONT_TINY)
 
-    for row = 0, visible_lines - 1 do
+    for row = 0, CRASH_VISIBLE_LINES - 1 do
         local index = scroll + row
         if index > #lines then
             break
         end
-        gfx.text(popup_x + 3, body_y + row * 6, truncate(lines[index], 28))
+        gfx.text(2, CRASH_BODY_BASELINE_Y + row * CRASH_LINE_HEIGHT, truncate(lines[index], CRASH_WRAP_WIDTH))
     end
 
-    gfx.text(popup_x + 4, popup_y + popup_h - 3, "UP/DN scroll BKSP close")
+    ui.footerCentered("UP/DN scroll BKSP close")
 
-    if #lines > visible_lines then
-        local bar_y = popup_y + 13
+    if #lines > CRASH_VISIBLE_LINES then
+        local bar_y = 14
         local bar_h = 34
-        local thumb_h = math.max(6, math.floor(bar_h * visible_lines / #lines))
-        local max_scroll = #lines - visible_lines
+        local thumb_h = math.max(6, math.floor(bar_h * CRASH_VISIBLE_LINES / #lines))
+        local max_scroll = #lines - CRASH_VISIBLE_LINES
         local thumb_y = bar_y
         if max_scroll > 0 then
             thumb_y = bar_y + math.floor((bar_h - thumb_h) * ((scroll - 1) / max_scroll))
         end
-        gfx.line(popup_x + popup_w - 4, bar_y, popup_x + popup_w - 4, bar_y + bar_h)
-        gfx.fillRect(popup_x + popup_w - 5, thumb_y, 3, thumb_h)
+        gfx.line(124, bar_y, 124, bar_y + bar_h)
+        gfx.fillRect(123, thumb_y, 3, thumb_h)
     end
 
     gfx.setColor(1)
@@ -442,6 +458,7 @@ local host = {
     notice = nil,
     notice_until = 0,
     input_block_until_release = false,
+    blocked_keys = {},
     desktop_enter_armed = true,
     last_input_ms = 0,
     close_prompt_active = false,
@@ -482,11 +499,35 @@ function host:show_notice(message, duration_ms)
     self.notice_until = sys.millis() + (duration_ms or 1800)
 end
 
+function host:block_input_until_release()
+    self.input_block_until_release = true
+    self.desktop_enter_armed = false
+end
+
+function host:block_key_until_release(key)
+    if not key then
+        return
+    end
+    self.blocked_keys[key] = { waiting_release = true, unblock_at = 0 }
+end
+
+function host:block_modal_keys_until_release()
+    for _, key in ipairs(MODAL_KEYS) do
+        self:block_key_until_release(key)
+    end
+end
+
+function host:is_key_blocked(key)
+    return key ~= nil and self.blocked_keys[key] ~= nil
+end
+
 function host:show_crash_popup(title, message)
     self.crash_popup_active = true
     self.crash_title = title or "App crash"
-    self.crash_lines = wrap_text_lines(message, 28)
+    self.crash_lines = wrap_text_lines(message, CRASH_WRAP_WIDTH)
     self.crash_scroll = 1
+    self:block_input_until_release()
+    self:block_modal_keys_until_release()
 end
 
 function host:update_notice()
@@ -682,6 +723,9 @@ function host:launch(descriptor)
         return
     end
 
+    self:block_input_until_release()
+    self:block_key_until_release(input.KEY_ENTER)
+
     if runtime_descriptor.built_in then
         self.launch_popup_until = 0
     else
@@ -694,8 +738,8 @@ function host:close_current_app()
     self.close_prompt_active = false
     self.close_prompt_selection = 1
     self.launch_popup_until = 0
-    self.input_block_until_release = true
-    self.desktop_enter_armed = false
+    self:block_input_until_release()
+    self:block_modal_keys_until_release()
     self.active_descriptor = nil
     self:refresh_catalog(preserve_id)
 end
@@ -708,7 +752,7 @@ function host:handle_crash_popup_input(key)
         self.crash_scroll = clamp(self.crash_scroll - 1, 1, max_scroll)
     elseif key == input.KEY_DOWN or key == input.KEY_RIGHT then
         self.crash_scroll = clamp(self.crash_scroll + 1, 1, max_scroll)
-    elseif key == input.KEY_ENTER or key == input.KEY_BKSP or key == input.KEY_ALT then
+    elseif key == input.KEY_BKSP then
         self.crash_popup_active = false
         self.crash_title = nil
         self.crash_lines = {}
@@ -779,13 +823,24 @@ function host:update()
         end
     end
 
+    local now = sys.millis()
+    for key, state in pairs(self.blocked_keys) do
+        if state.waiting_release then
+            if not input.held(key) then
+                state.waiting_release = false
+                state.unblock_at = now + TRANSITION_KEY_GRACE_MS
+            end
+        elseif now >= state.unblock_at then
+            self.blocked_keys[key] = nil
+        end
+    end
+
     if self.launch_popup_until ~= 0 and sys.millis() >= self.launch_popup_until then
         self.launch_popup_until = 0
     end
     if self.active_descriptor then
         self:invoke(self.active_descriptor, "update")
     else
-        local now = sys.millis()
         if now - self.last_catalog_poll >= self.catalog_poll_interval
             and now - self.last_input_ms >= 500 then
             local preserve_id = self.apps[self.selected_index] and self.apps[self.selected_index].id or nil
@@ -866,13 +921,17 @@ function host:desktop_input(key)
 end
 
 function host:input(key)
-    if self.crash_popup_active then
-        self.last_input_ms = sys.millis()
-        self:handle_crash_popup_input(key)
+    if self.input_block_until_release then
         return
     end
 
-    if self.input_block_until_release then
+    if self:is_key_blocked(key) then
+        return
+    end
+
+    if self.crash_popup_active then
+        self.last_input_ms = sys.millis()
+        self:handle_crash_popup_input(key)
         return
     end
 
@@ -887,12 +946,16 @@ function host:input(key)
             if key == input.KEY_ESC and input.held(input.KEY_ALT) then
                 self.close_prompt_active = true
                 self.close_prompt_selection = 1
+                self:block_input_until_release()
+                self:block_modal_keys_until_release()
             end
             return
         end
         if key == input.KEY_ESC and input.held(input.KEY_ALT) then
             self.close_prompt_active = true
             self.close_prompt_selection = 1
+            self:block_input_until_release()
+            self:block_modal_keys_until_release()
             return
         end
         self:invoke(self.active_descriptor, "input", key)
@@ -909,6 +972,7 @@ function host:init()
     self.notice = nil
     self.notice_until = 0
     self.input_block_until_release = false
+    self.blocked_keys = {}
     self.desktop_enter_armed = true
     self.last_input_ms = 0
     self.close_prompt_active = false
@@ -934,6 +998,8 @@ function file_browser:show_message(message, button_label)
     self.message_active = true
     self.message_text = message
     self.message_button = button_label or "OK"
+    host:block_input_until_release()
+    host:block_modal_keys_until_release()
 end
 
 function file_browser:clear_message()

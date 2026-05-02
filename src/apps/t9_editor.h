@@ -54,11 +54,16 @@ static const size_t kT9EditorReadWriteMaxBytes = 16 * 1024;
 
 extern const size_t kT9EditorReadOnlyPageSizeOptions[];
 extern const int kT9EditorReadOnlyPageSizeOptionCount;
+extern const char* kT9EditorFontSizeOptionLabels[];
+extern const int kT9EditorFontSizeOptionCount;
 
 size_t getT9EditorReadOnlyPageBytes();
 int getT9EditorReadOnlyPageSizeOptionIndex();
 size_t getT9EditorReadOnlyPageSizeOption(int index);
 bool setT9EditorReadOnlyPageSizeOptionIndex(int index);
+int getT9EditorFontSizeOptionIndex();
+const char* getT9EditorFontSizeOptionLabel(int index);
+bool setT9EditorFontSizeOptionIndex(int index);
 
 class T9EditorApp : public App {
   private:

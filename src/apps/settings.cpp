@@ -295,6 +295,7 @@ SettingsApp::SettingsApp() {
     tempBrightness = systemBrightness;
     tempContrast = systemContrast;
     tempSleepEnabled = SLEEP_ENABLED;
+    tempT9FontSizeIndex = getT9EditorFontSizeOptionIndex();
     tempReadOnlyPageSizeIndex = getT9EditorReadOnlyPageSizeOptionIndex();
     lastPressedKey = ' ';
     for (int i = 0; i < HISTORY_SIZE; i++) keyHistory[i] = ' ';
@@ -318,6 +319,7 @@ void SettingsApp::start() {
     tempBrightness = systemBrightness;
     tempContrast = systemContrast;
     tempSleepEnabled = sleepEnabled;
+    tempT9FontSizeIndex = getT9EditorFontSizeOptionIndex();
     tempReadOnlyPageSizeIndex = getT9EditorReadOnlyPageSizeOptionIndex();
     editMode = false;
     inKeyTester = false;
@@ -335,6 +337,7 @@ void SettingsApp::stop() {
     systemBrightness = tempBrightness;
     systemContrast = tempContrast;
     sleepEnabled = tempSleepEnabled;
+    setT9EditorFontSizeOptionIndex(tempT9FontSizeIndex);
     setT9EditorReadOnlyPageSizeOptionIndex(tempReadOnlyPageSizeIndex);
     inKeyTester = false;
     inT9Editor = false;
@@ -493,6 +496,9 @@ void SettingsApp::handleInput(char key) {
     } else {
         if (key == KEY_ENTER) {
             editMode = false;
+            if (selectedIndex == SETTING_T9_FONT_SIZE) {
+                setT9EditorFontSizeOptionIndex(tempT9FontSizeIndex);
+            }
             if (selectedIndex == SETTING_BRIGHTNESS) {
                 systemBrightness = tempBrightness;
                 ledcWrite(0, systemBrightness);
@@ -512,6 +518,19 @@ void SettingsApp::handleInput(char key) {
                 tempBrightness -= 15;
                 if (tempBrightness < 10) tempBrightness = 10;
                 ledcWrite(0, tempBrightness);
+            }
+        }
+
+        if (selectedIndex == SETTING_T9_FONT_SIZE) {
+            if (key == KEY_LEFT || key == KEY_RIGHT) {
+                int nextIndex = tempT9FontSizeIndex;
+                if (key == KEY_LEFT) nextIndex--;
+                else nextIndex++;
+
+                if (nextIndex < 0) nextIndex = kT9EditorFontSizeOptionCount - 1;
+                if (nextIndex >= kT9EditorFontSizeOptionCount) nextIndex = 0;
+
+                tempT9FontSizeIndex = nextIndex;
             }
         }
 
@@ -621,6 +640,12 @@ void SettingsApp::renderSettingsList() {
         switch ((SettingItem)idx) {
         case SETTING_SD_REMOUNT:
             snprintf(buf, sizeof(buf), "(Re)mount SD card");
+            break;
+        case SETTING_T9_FONT_SIZE:
+            if (editMode && isSelected)
+                snprintf(buf, sizeof(buf), "T9 font: <%s>", getT9EditorFontSizeOptionLabel(tempT9FontSizeIndex));
+            else
+                snprintf(buf, sizeof(buf), "T9 font: %s", getT9EditorFontSizeOptionLabel(tempT9FontSizeIndex));
             break;
         case SETTING_BRIGHTNESS: {
             int pct = (tempBrightness * 100) / 255;

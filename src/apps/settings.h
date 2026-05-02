@@ -17,6 +17,7 @@ class SettingsApp : public App {
 
     enum SettingItem {
       SETTING_SD_REMOUNT = 0,
+      SETTING_T9_FONT_SIZE,
       SETTING_BRIGHTNESS,
       SETTING_NEW_BLANK_LUA_APP,
       SETTING_RO_PAGE_SIZE,
@@ -42,6 +43,7 @@ class SettingsApp : public App {
     int tempBrightness;
     int tempContrast;
     bool tempSleepEnabled;
+    int tempT9FontSizeIndex;
     int tempReadOnlyPageSizeIndex;
 
     // Key tester state

@@ -39,7 +39,26 @@ static const char* kEditorRewriteTempPath = "/.t9sys/rewrite.tmp";
 static const char* kEditorRewriteBackupPath = "/.t9sys/rewrite.bak";
 const size_t kT9EditorReadOnlyPageSizeOptions[] = {2048, 1024, 512, 256};
 const int kT9EditorReadOnlyPageSizeOptionCount = 4;
+const char* kT9EditorFontSizeOptionLabels[] = {"Medium", "Small", "Tiny"};
+const int kT9EditorFontSizeOptionCount = 3;
 static int gT9EditorReadOnlyPageSizeOptionIndex = 2;
+static int gT9EditorFontSizeOptionIndex = 0;
+
+struct T9EditorFontMetrics {
+    const uint8_t* font;
+    int lineHeight;
+    int baselineOffset;
+    int glyphTopOffset;
+    int boxHeight;
+    int cursorHeight;
+    int underlineOffset;
+};
+
+static const T9EditorFontMetrics kT9EditorFontMetrics[] = {
+    {u8g2_font_5x8_tr, 9, 8, 7, 9, 8, 2},
+    {u8g2_font_5x7_tf, 8, 7, 6, 8, 7, 1},
+    {u8g2_font_4x6_tf, 7, 6, 5, 7, 6, 1},
+};
 
 static_assert(sizeof(EditorRecordHeader) < kEditorRecordSize,
               "Editor record header must fit within the fixed record size");
@@ -93,6 +112,33 @@ bool setT9EditorReadOnlyPageSizeOptionIndex(int index) {
     }
     gT9EditorReadOnlyPageSizeOptionIndex = index;
     return true;
+}
+
+int getT9EditorFontSizeOptionIndex() {
+    return gT9EditorFontSizeOptionIndex;
+}
+
+const char* getT9EditorFontSizeOptionLabel(int index) {
+    if (index < 0 || index >= kT9EditorFontSizeOptionCount) {
+        return kT9EditorFontSizeOptionLabels[0];
+    }
+    return kT9EditorFontSizeOptionLabels[index];
+}
+
+bool setT9EditorFontSizeOptionIndex(int index) {
+    if (index < 0 || index >= kT9EditorFontSizeOptionCount) {
+        return false;
+    }
+    gT9EditorFontSizeOptionIndex = index;
+    return true;
+}
+
+static const T9EditorFontMetrics& getCurrentFontMetrics() {
+    int index = gT9EditorFontSizeOptionIndex;
+    if (index < 0 || index >= kT9EditorFontSizeOptionCount) {
+        index = 0;
+    }
+    return kT9EditorFontMetrics[index];
 }
 
 static uint32_t fnv1a32(const String& text) {
@@ -1717,7 +1763,8 @@ bool T9EditorApp::showLineNumbers() const {
 int T9EditorApp::getVisibleLineCount() const {
     int textTop = showHeader() ? 13 : 1;
     int textBottom = showFooter() ? 53 : 63;
-    int visible = (textBottom - textTop + 1) / 9;
+    const T9EditorFontMetrics& metrics = getCurrentFontMetrics();
+    int visible = (textBottom - textTop + 1) / metrics.lineHeight;
     return max(1, visible);
 }
 
@@ -1733,7 +1780,7 @@ int T9EditorApp::getGutterWidth(int logicalLineCount) const {
     if (!showLineNumbers()) return 0;
     char buf[12];
     snprintf(buf, sizeof(buf), "%d", max(1, logicalLineCount));
-    u8g2.setFont(u8g2_font_5x8_tr);
+    u8g2.setFont(getCurrentFontMetrics().font);
     return u8g2.getStrWidth(buf) + 4;
 }
 
@@ -2434,7 +2481,7 @@ void T9EditorApp::recalculateLayout() {
 
     String preview;
     String displayText = getDisplayText(&preview);
-    u8g2.setFont(u8g2_font_5x8_tr);
+    u8g2.setFont(getCurrentFontMetrics().font);
 
     int logicalLineCount = countLogicalLines();
     int textLeft = getTextLeft(logicalLineCount);
@@ -2640,6 +2687,9 @@ void T9EditorApp::render() {
     int textTop = showHeader() ? 13 : 1;
     int textBottom = showFooter() ? 53 : 63;
     int visibleLines = getVisibleLineCount();
+    const T9EditorFontMetrics& metrics = getCurrentFontMetrics();
+
+    u8g2.setFont(metrics.font);
 
     if (showLineNumbers()) {
         u8g2.drawVLine(gutterWidth, textTop, textBottom - textTop + 1);
@@ -2652,7 +2702,7 @@ void T9EditorApp::render() {
         fbDispEnd = cursorPos + (int)preview.length();
     }
 
-    int y = textTop + 8;
+    int y = textTop + metrics.baselineOffset;
     for (int i = 0; i < visibleLines; i++) {
         int idx = scrollOffset + i;
         if (idx >= (int)visualLines.size()) break;
@@ -2675,7 +2725,7 @@ void T9EditorApp::render() {
             String fbPart = vl.content.substring(regionS, regionE);
             int xFb = textLeft + u8g2.getUTF8Width(vl.content.substring(0, regionS).c_str());
             int wFb = u8g2.getUTF8Width(fbPart.c_str());
-            u8g2.drawBox(xFb, y - 7, wFb, 9);
+            u8g2.drawBox(xFb, y - metrics.glyphTopOffset, wFb, metrics.boxHeight);
             u8g2.setDrawColor(0);
             u8g2.drawUTF8(xFb, y, fbPart.c_str());
             u8g2.setDrawColor(1);
@@ -2697,15 +2747,15 @@ void T9EditorApp::render() {
             int cursorX = textLeft + u8g2.getUTF8Width(before.c_str());
             if (preview.length() > 0) {
                 int pw = u8g2.getUTF8Width(preview.c_str());
-                u8g2.drawHLine(cursorX, y + 2, pw);
+                u8g2.drawHLine(cursorX, y + metrics.underlineOffset, pw);
             } else {
                 bool recentMove = (millis() - cursorMoveTime < CURSOR_BLINK_RATE);
                 if (recentMove || (millis() / CURSOR_BLINK_RATE) % 2) {
-                    u8g2.drawVLine(cursorX, y - 7, 8);
+                    u8g2.drawVLine(cursorX, y - metrics.glyphTopOffset, metrics.cursorHeight);
                 }
             }
         }
-        y += 9;
+        y += metrics.lineHeight;
     }
 
     renderFooter();

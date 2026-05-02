@@ -1,8 +1,8 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/apps/t9_editor.h
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TACTICAL_TODO TASK_1
-// LOG_REF: 2026-04-30
+// TRUTH_LINK: TACTICAL_TODO TASK_2
+// LOG_REF: 2026-05-02
 // Description: Canonical T9 editor/viewer app with split RO paging and capped RW editing.
 
 #ifndef APP_T9_EDITOR_H
@@ -18,6 +18,20 @@ struct VisualLine {
   bool hasCursor;
   int byteStartIndex;
   int byteLength;
+};
+
+struct EditorUndoState {
+  String documentBuffer;
+  int cursorPos;
+  bool selectionMode;
+  int selectionAnchorPos;
+  int selectionFocusPos;
+  unsigned long activeHistorySnapshotId;
+};
+
+struct ClipboardPopupEntry {
+  int slot;
+  String preview;
 };
 
 enum T9ViewMode {
@@ -77,6 +91,7 @@ class T9EditorApp : public App {
   bool pageDirty;
   String historyDocumentId;
   unsigned long historyNextSnapshotId;
+  unsigned long activeHistorySnapshotId;
   int nextClipboardSlot;
 
   T9Predict t9predict;
@@ -96,9 +111,48 @@ class T9EditorApp : public App {
   int fallbackStart;
   bool selectionMode;
   bool shiftTapPending;
+  int selectionAnchorPos;
+  int selectionFocusPos;
+  std::vector<EditorUndoState> undoStack;
+  std::vector<EditorUndoState> redoStack;
+  bool clipboardPopupActive;
+  int clipboardPopupSelection;
+  int clipboardPopupScroll;
+  std::vector<ClipboardPopupEntry> clipboardPopupEntries;
 
   void resetEditorSession();
   void resetPagedSession();
+  void clearSelectionState();
+  void enterSelectionMode();
+  void exitSelectionMode();
+  void syncSelectionFocusToCursor();
+  bool hasSelectionRange() const;
+  int getSelectionStart() const;
+  int getSelectionEnd() const;
+  void clearTransientInputState();
+  EditorUndoState captureUndoState() const;
+  void restoreUndoState(const EditorUndoState& state);
+  void pushUndoState(std::vector<EditorUndoState>& stack, const EditorUndoState& state);
+  void recordUndoState();
+  bool undoFromHistory();
+  bool undoEdit();
+  bool redoEdit();
+  String getSelectedText() const;
+  bool replaceDocumentRange(int start, int end, const String& replacement, int newCursorPos,
+                            bool recordUndo = true);
+  bool removeDocumentRange(int start, int end, bool recordUndo = true);
+  String previewClipboardText(const String& value) const;
+  bool readClipboardSlotPreview(int slot, String& preview, String& error) const;
+  bool rebuildClipboardPopupEntries(String& error);
+  bool openClipboardPopup();
+  void closeClipboardPopup();
+  bool applyClipboardEntry(int entryIndex);
+  bool copySelectionToClipboard(bool cutSelection);
+  void handleClipboardPopupInput(char key);
+  int getClipboardPopupVisibleRows() const;
+  int getClipboardPopupTopY() const;
+  int getTextBottomY() const;
+  void renderClipboardPopup() const;
   String readDocumentSlice(int start, int length) const;
   int getDocumentLength() const;
   void showReadWriteCapToast() const;
@@ -123,6 +177,7 @@ class T9EditorApp : public App {
   String getClipboardRoot() const;
   String getDocumentHistoryRoot() const;
   String getDocumentManifestPath() const;
+  String getHistorySnapshotPath(unsigned long snapshotId) const;
   String getClipboardManifestPath() const;
   String getClipboardSlotPath(int slot) const;
   String buildDefaultHistoryDocumentId() const;

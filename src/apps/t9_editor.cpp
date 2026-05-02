@@ -1,8 +1,8 @@
 // PROJECT: ESP32-S2-Mini handheld terminal
 // MODULE: src/apps/t9_editor.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TACTICAL_TODO TASK_1
-// LOG_REF: 2026-04-30
+// TRUTH_LINK: TACTICAL_TODO TASK_2
+// LOG_REF: 2026-05-02
 // Description: Canonical T9 editor/viewer app with predictive input, split RO paging, and capped RW file editing.
 
 #include "t9_editor.h"
@@ -28,6 +28,7 @@ static const uint32_t kEditorRecordMagic = 0x54494348UL;
 static const uint32_t kEditorRecordVersion = 1;
 static const uint32_t kEditorRecordKindClipboardSlot = 3;
 static const int kClipboardSlotCount = 12;
+static const size_t kEditorUndoHistoryLimit = 16;
 static const char* kEditorSystemRoot = "/.t9sys";
 static const char* kEditorHistoryRoot = "/.t9sys/history";
 static const char* kEditorClipboardRoot = "/.t9sys/clipboard";
@@ -707,8 +708,11 @@ void T9EditorApp::resetEditorSession() {
     fallback = false;
     fallbackStart = 0;
     scrollOffset = 0;
-    selectionMode = false;
+    clearSelectionState();
     shiftTapPending = false;
+    undoStack.clear();
+    redoStack.clear();
+    closeClipboardPopup();
 }
 
 void T9EditorApp::resetPagedSession() {
@@ -719,7 +723,628 @@ void T9EditorApp::resetPagedSession() {
     pageDirty = false;
     historyDocumentId = "";
     historyNextSnapshotId = 1;
+    activeHistorySnapshotId = 0;
     nextClipboardSlot = 1;
+}
+
+void T9EditorApp::clearSelectionState() {
+    selectionMode = false;
+    selectionAnchorPos = -1;
+    selectionFocusPos = -1;
+}
+
+void T9EditorApp::enterSelectionMode() {
+    clearTransientInputState();
+    selectionMode = true;
+    selectionAnchorPos = cursorPos;
+    selectionFocusPos = cursorPos;
+}
+
+void T9EditorApp::exitSelectionMode() {
+    selectionMode = false;
+    selectionAnchorPos = -1;
+    selectionFocusPos = -1;
+}
+
+void T9EditorApp::syncSelectionFocusToCursor() {
+    if (!selectionMode) {
+        return;
+    }
+
+    if (cursorPos < 0) {
+        cursorPos = 0;
+    }
+    int documentLength = getDocumentLength();
+    if (cursorPos > documentLength) {
+        cursorPos = documentLength;
+    }
+    selectionFocusPos = cursorPos;
+}
+
+bool T9EditorApp::hasSelectionRange() const {
+    return selectionMode && selectionAnchorPos >= 0 && selectionFocusPos >= 0 &&
+           selectionAnchorPos != selectionFocusPos;
+}
+
+int T9EditorApp::getSelectionStart() const {
+    if (!hasSelectionRange()) {
+        return cursorPos;
+    }
+    return min(selectionAnchorPos, selectionFocusPos);
+}
+
+int T9EditorApp::getSelectionEnd() const {
+    if (!hasSelectionRange()) {
+        return cursorPos;
+    }
+    return max(selectionAnchorPos, selectionFocusPos);
+}
+
+void T9EditorApp::clearTransientInputState() {
+    t9predict.reset();
+    tapKey = '\0';
+    tapIndex = 0;
+    tapTime = 0;
+    singleKeyCycleIndex = 0;
+    zeroPending = false;
+    fallback = false;
+    fallbackStart = cursorPos;
+}
+
+EditorUndoState T9EditorApp::captureUndoState() const {
+    EditorUndoState state;
+    state.documentBuffer = documentBuffer;
+    state.cursorPos = cursorPos;
+    state.selectionMode = selectionMode;
+    state.selectionAnchorPos = selectionAnchorPos;
+    state.selectionFocusPos = selectionFocusPos;
+    state.activeHistorySnapshotId = activeHistorySnapshotId;
+    return state;
+}
+
+void T9EditorApp::restoreUndoState(const EditorUndoState& state) {
+    documentBuffer = state.documentBuffer;
+    cursorPos = state.cursorPos;
+    selectionMode = state.selectionMode;
+    selectionAnchorPos = state.selectionAnchorPos;
+    selectionFocusPos = state.selectionFocusPos;
+    activeHistorySnapshotId = state.activeHistorySnapshotId;
+
+    if (cursorPos < 0) cursorPos = 0;
+    if (cursorPos > getDocumentLength()) cursorPos = getDocumentLength();
+
+    if (selectionMode) {
+        if (selectionAnchorPos < 0) selectionAnchorPos = cursorPos;
+        if (selectionFocusPos < 0) selectionFocusPos = cursorPos;
+        if (selectionAnchorPos > getDocumentLength()) selectionAnchorPos = getDocumentLength();
+        if (selectionFocusPos > getDocumentLength()) selectionFocusPos = getDocumentLength();
+    } else {
+        selectionAnchorPos = -1;
+        selectionFocusPos = -1;
+    }
+
+    closeClipboardPopup();
+    clearTransientInputState();
+    if (!isReadOnly()) {
+        pageDirty = true;
+    }
+}
+
+void T9EditorApp::pushUndoState(std::vector<EditorUndoState>& stack, const EditorUndoState& state) {
+    if (stack.size() >= kEditorUndoHistoryLimit) {
+        stack.erase(stack.begin());
+    }
+    stack.push_back(state);
+}
+
+void T9EditorApp::recordUndoState() {
+    if (isReadOnly()) {
+        return;
+    }
+    pushUndoState(undoStack, captureUndoState());
+    redoStack.clear();
+}
+
+bool T9EditorApp::undoFromHistory() {
+    if (sourceKind != SOURCE_PAGED_FILE || isReadOnly()) {
+        return false;
+    }
+
+    String error;
+    if (!ensureHistoryDocument(error)) {
+        GUI::showToast(error.c_str(), 2000);
+        return false;
+    }
+
+    unsigned long candidate = activeHistorySnapshotId;
+    if (candidate == 0) {
+        candidate = historyNextSnapshotId;
+    }
+
+    if (candidate <= 1) {
+        return false;
+    }
+
+    EditorSdSessionGuard session;
+    if (!session.begin()) {
+        GUI::showToast("Failed to open SD session", 2000);
+        return false;
+    }
+
+    while (candidate > 1) {
+        candidate--;
+        const String snapshotPath = getHistorySnapshotPath(candidate);
+        if (!sdFat.exists(snapshotPath.c_str())) {
+            continue;
+        }
+
+        String snapshotContent;
+        if (!readSmallFileUnlocked(snapshotPath, snapshotContent, error)) {
+            GUI::showToast(error.c_str(), 2000);
+            return false;
+        }
+
+        if (snapshotContent == documentBuffer) {
+            continue;
+        }
+
+        pushUndoState(redoStack, captureUndoState());
+        documentBuffer = snapshotContent;
+        if (cursorPos > getDocumentLength()) {
+            cursorPos = getDocumentLength();
+        }
+        exitSelectionMode();
+        clearTransientInputState();
+        closeClipboardPopup();
+        activeHistorySnapshotId = candidate;
+        pageDirty = true;
+        return true;
+    }
+
+    return false;
+}
+
+bool T9EditorApp::undoEdit() {
+    if (isReadOnly()) {
+        GUI::showToast("RO action blocked", 1500);
+        return false;
+    }
+    if (undoStack.empty()) {
+        if (undoFromHistory()) {
+            return true;
+        }
+        GUI::showToast("Nothing to undo", 1500);
+        return false;
+    }
+
+    pushUndoState(redoStack, captureUndoState());
+    EditorUndoState state = undoStack.back();
+    undoStack.pop_back();
+    restoreUndoState(state);
+    return true;
+}
+
+bool T9EditorApp::redoEdit() {
+    if (isReadOnly()) {
+        GUI::showToast("RO action blocked", 1500);
+        return false;
+    }
+    if (redoStack.empty()) {
+        GUI::showToast("Nothing to redo", 1500);
+        return false;
+    }
+
+    pushUndoState(undoStack, captureUndoState());
+    EditorUndoState state = redoStack.back();
+    redoStack.pop_back();
+    restoreUndoState(state);
+    return true;
+}
+
+String T9EditorApp::getSelectedText() const {
+    if (!hasSelectionRange()) {
+        return "";
+    }
+    const int start = getSelectionStart();
+    const int end = getSelectionEnd();
+    return readDocumentSlice(start, end - start);
+}
+
+bool T9EditorApp::replaceDocumentRange(int start, int end, const String& replacement, int newCursorPos,
+                                       bool recordUndo) {
+    if (start < 0) start = 0;
+    if (end < start) end = start;
+
+    const int documentLength = getDocumentLength();
+    if (start > documentLength) start = documentLength;
+    if (end > documentLength) end = documentLength;
+
+    const size_t replacedLength = static_cast<size_t>(end - start);
+    const size_t newLength = static_cast<size_t>(documentLength) - replacedLength + replacement.length();
+    if (sourceKind == SOURCE_PAGED_FILE && !isReadOnly() && newLength > kT9EditorReadWriteMaxBytes) {
+        showReadWriteCapToast();
+        return false;
+    }
+
+    if (recordUndo) {
+        recordUndoState();
+    }
+
+    documentBuffer = documentBuffer.substring(0, start) + replacement + documentBuffer.substring(end);
+    cursorPos = newCursorPos;
+    if (cursorPos < 0) cursorPos = 0;
+    if (cursorPos > getDocumentLength()) cursorPos = getDocumentLength();
+
+    if (selectionMode) {
+        selectionAnchorPos = cursorPos;
+        selectionFocusPos = cursorPos;
+    }
+    return true;
+}
+
+bool T9EditorApp::removeDocumentRange(int start, int end, bool recordUndo) {
+    return replaceDocumentRange(start, end, "", start, recordUndo);
+}
+
+String T9EditorApp::previewClipboardText(const String& value) const {
+    String preview = "";
+    for (int i = 0; i < value.length(); i++) {
+        char c = value[i];
+        if (c == '\n' || c == '\r') {
+            break;
+        }
+        if (c == '\t') {
+            c = ' ';
+        }
+        preview += c;
+    }
+    while (preview.indexOf("  ") >= 0) {
+        preview.replace("  ", " ");
+    }
+    preview.trim();
+    if (preview.length() == 0) {
+        preview = "(empty)";
+    }
+    return preview;
+}
+
+bool T9EditorApp::readClipboardSlotPreview(int slot, String& preview, String& error) const {
+    preview = "";
+    if (slot < 1 || slot > kClipboardSlotCount) {
+        error = "Clipboard slot is out of range";
+        return false;
+    }
+
+    EditorSdSessionGuard session;
+    if (!session.begin()) {
+        error = "Failed to open SD session";
+        return false;
+    }
+
+    FsFile file;
+    if (!file.open(getClipboardSlotPath(slot).c_str(), O_RDONLY)) {
+        error = String("Failed to open fixed record: ") + getClipboardSlotPath(slot);
+        return false;
+    }
+    if (file.isDir()) {
+        error = String("Path is a directory: ") + getClipboardSlotPath(slot);
+        return false;
+    }
+    if (static_cast<size_t>(file.size()) != kEditorRecordSize) {
+        error = String("Unexpected fixed record size: ") + getClipboardSlotPath(slot);
+        return false;
+    }
+
+    uint8_t headerBytes[sizeof(EditorRecordHeader)];
+    int headerRead = file.read(headerBytes, sizeof(headerBytes));
+    if (headerRead != static_cast<int>(sizeof(headerBytes))) {
+        error = String("Failed to read fixed record header: ") + getClipboardSlotPath(slot);
+        return false;
+    }
+
+    EditorRecordHeader header;
+    memcpy(&header, headerBytes, sizeof(header));
+    if (header.magic != kEditorRecordMagic || header.version != kEditorRecordVersion) {
+        error = String("Fixed record header mismatch: ") + getClipboardSlotPath(slot);
+        return false;
+    }
+    if (header.kind != kEditorRecordKindClipboardSlot || header.index != static_cast<uint32_t>(slot)) {
+        error = String("Fixed record kind/index mismatch: ") + getClipboardSlotPath(slot);
+        return false;
+    }
+    if (header.payloadLength > kEditorRecordPayloadBytes) {
+        error = String("Fixed record payload is out of range: ") + getClipboardSlotPath(slot);
+        return false;
+    }
+    if (header.payloadLength == 0) {
+        error = "";
+        return true;
+    }
+
+    static const size_t kClipboardPreviewCharLimit = 96;
+    char buffer[32];
+    size_t remaining = header.payloadLength;
+    bool truncated = false;
+    bool sawLineBreak = false;
+
+    while (remaining > 0 && !sawLineBreak && preview.length() < static_cast<int>(kClipboardPreviewCharLimit)) {
+        size_t chunk = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+        int bytesRead = file.read(buffer, chunk);
+        if (bytesRead < 0) {
+            error = String("Failed to read fixed record preview: ") + getClipboardSlotPath(slot);
+            return false;
+        }
+        if (bytesRead == 0) {
+            break;
+        }
+
+        remaining -= static_cast<size_t>(bytesRead);
+        for (int i = 0; i < bytesRead; i++) {
+            char c = buffer[i];
+            if (c == '\n' || c == '\r') {
+                sawLineBreak = true;
+                break;
+            }
+            if (preview.length() >= static_cast<int>(kClipboardPreviewCharLimit)) {
+                truncated = true;
+                break;
+            }
+            preview += c;
+        }
+    }
+
+    if (!sawLineBreak && remaining > 0) {
+        truncated = true;
+    }
+
+    preview = previewClipboardText(preview);
+    if (truncated && preview != "(empty)") {
+        preview += "...";
+    }
+
+    error = "";
+    return true;
+}
+
+bool T9EditorApp::rebuildClipboardPopupEntries(String& error) {
+    clipboardPopupEntries.clear();
+    if (!loadClipboardState(error)) {
+        return false;
+    }
+
+    int slot = nextClipboardSlot - 1;
+    if (slot < 1) slot = kClipboardSlotCount;
+    for (int count = 0; count < kClipboardSlotCount; count++) {
+        String readError;
+        String preview;
+        if (!readClipboardSlotPreview(slot, preview, readError)) {
+            error = readError;
+            return false;
+        }
+        if (preview.length() > 0) {
+            ClipboardPopupEntry entry;
+            entry.slot = slot;
+            entry.preview = preview;
+            clipboardPopupEntries.push_back(entry);
+        }
+        slot--;
+        if (slot < 1) slot = kClipboardSlotCount;
+    }
+
+    error = "";
+    return true;
+}
+
+bool T9EditorApp::openClipboardPopup() {
+    if (isReadOnly()) {
+        GUI::showToast("RO action blocked", 1500);
+        return false;
+    }
+
+    String error;
+    if (!rebuildClipboardPopupEntries(error)) {
+        GUI::showToast(error.c_str(), 2000);
+        return false;
+    }
+    if (clipboardPopupEntries.empty()) {
+        GUI::showToast("Clipboard empty", 1500);
+        return false;
+    }
+
+    clearTransientInputState();
+    clipboardPopupActive = true;
+    clipboardPopupSelection = 0;
+    clipboardPopupScroll = 0;
+    return true;
+}
+
+void T9EditorApp::closeClipboardPopup() {
+    clipboardPopupActive = false;
+    clipboardPopupSelection = 0;
+    clipboardPopupScroll = 0;
+    clipboardPopupEntries.clear();
+}
+
+bool T9EditorApp::applyClipboardEntry(int entryIndex) {
+    if (entryIndex < 0 || entryIndex >= static_cast<int>(clipboardPopupEntries.size())) {
+        return false;
+    }
+
+    String content;
+    String error;
+    if (!readClipboardSlot(clipboardPopupEntries[entryIndex].slot, content, error)) {
+        GUI::showToast(error.c_str(), 2000);
+        return false;
+    }
+
+    const int replaceStart = hasSelectionRange() ? getSelectionStart() : cursorPos;
+    const int replaceEnd = hasSelectionRange() ? getSelectionEnd() : cursorPos;
+    if (!replaceDocumentRange(replaceStart, replaceEnd, content,
+                              replaceStart + static_cast<int>(content.length()), true)) {
+        return false;
+    }
+
+    clearTransientInputState();
+    markPageDirty();
+    closeClipboardPopup();
+    exitSelectionMode();
+    return true;
+}
+
+bool T9EditorApp::copySelectionToClipboard(bool cutSelection) {
+    if (isReadOnly()) {
+        GUI::showToast("RO action blocked", 1500);
+        return false;
+    }
+    if (!hasSelectionRange()) {
+        GUI::showToast("No selection", 1500);
+        return false;
+    }
+
+    String error;
+    int writtenSlot = 0;
+    if (!writeClipboardSlot(getSelectedText(), writtenSlot, error)) {
+        GUI::showToast(error.c_str(), 2000);
+        return false;
+    }
+
+    if (cutSelection) {
+        const int start = getSelectionStart();
+        const int end = getSelectionEnd();
+        if (!removeDocumentRange(start, end, true)) {
+            return false;
+        }
+        clearTransientInputState();
+        markPageDirty();
+    }
+
+    exitSelectionMode();
+
+    GUI::showToast(cutSelection ? "Cut" : "Copied", 1200);
+    return true;
+}
+
+void T9EditorApp::handleClipboardPopupInput(char key) {
+    if (key == KEY_SHIFT) {
+        if (isKeyHeld(KEY_SHIFT)) {
+            shiftTapPending = false;
+            closeClipboardPopup();
+            exitSelectionMode();
+            recalculateLayout();
+        } else {
+            shiftTapPending = true;
+        }
+        return;
+    }
+
+    if (key == KEY_ESC) {
+        closeClipboardPopup();
+        exitSelectionMode();
+        recalculateLayout();
+        return;
+    }
+
+    if (key == KEY_BKSP) {
+        closeClipboardPopup();
+        recalculateLayout();
+        return;
+    }
+
+    if (key == KEY_UP) {
+        if (clipboardPopupSelection > 0) {
+            clipboardPopupSelection--;
+        }
+        if (clipboardPopupSelection < clipboardPopupScroll) {
+            clipboardPopupScroll = clipboardPopupSelection;
+        }
+        recalculateLayout();
+        return;
+    }
+
+    if (key == KEY_DOWN) {
+        if (clipboardPopupSelection + 1 < static_cast<int>(clipboardPopupEntries.size())) {
+            clipboardPopupSelection++;
+        }
+        const int visibleRows = getClipboardPopupVisibleRows();
+        if (clipboardPopupSelection >= clipboardPopupScroll + visibleRows) {
+            clipboardPopupScroll = clipboardPopupSelection - visibleRows + 1;
+        }
+        recalculateLayout();
+        return;
+    }
+
+    if (key == KEY_ENTER) {
+        if (applyClipboardEntry(clipboardPopupSelection)) {
+            recalculateLayout();
+        }
+    }
+}
+
+int T9EditorApp::getClipboardPopupVisibleRows() const {
+    return 2;
+}
+
+int T9EditorApp::getClipboardPopupTopY() const {
+    const GUI::FontMetrics& popupMetrics = GUI::getSecondaryFontMetrics();
+    const int popupHeight = (popupMetrics.lineHeight * getClipboardPopupVisibleRows()) + 8;
+    const int contentBottom = showFooter() ? 53 : 63;
+    return contentBottom - popupHeight + 1;
+}
+
+int T9EditorApp::getTextBottomY() const {
+    int textBottom = showFooter() ? 53 : 63;
+    if (clipboardPopupActive) {
+        textBottom = min(textBottom, getClipboardPopupTopY() - 2);
+    }
+    return textBottom;
+}
+
+void T9EditorApp::renderClipboardPopup() const {
+    if (!clipboardPopupActive) {
+        return;
+    }
+
+    const GUI::FontMetrics& popupMetrics = GUI::getSecondaryFontMetrics();
+    const int visibleRows = getClipboardPopupVisibleRows();
+    const int popupX = 4;
+    const int popupY = getClipboardPopupTopY();
+    const int popupWidth = GUI::SCREEN_WIDTH - 8;
+    const int popupHeight = (popupMetrics.lineHeight * visibleRows) + 8;
+    const int popupTextWidth = popupWidth - 10 - (static_cast<int>(clipboardPopupEntries.size()) > visibleRows ? GUI::SCROLLBAR_WIDTH + 2 : 0);
+
+    GUI::drawPopupFrame(popupX, popupY, popupWidth, popupHeight, true);
+    GUI::setFontSecondary();
+
+    int baselineY = popupY + 3 + popupMetrics.baselineOffset;
+    for (int row = 0; row < visibleRows; row++) {
+        const int index = clipboardPopupScroll + row;
+        if (index >= static_cast<int>(clipboardPopupEntries.size())) {
+            break;
+        }
+
+        const int itemY = baselineY + (row * popupMetrics.lineHeight);
+        if (index == clipboardPopupSelection) {
+            u8g2.drawBox(popupX + 2,
+                         itemY - popupMetrics.glyphTopOffset,
+                         popupWidth - 4 - (static_cast<int>(clipboardPopupEntries.size()) > visibleRows ? GUI::SCROLLBAR_WIDTH + 1 : 0),
+                         popupMetrics.boxHeight);
+            u8g2.setDrawColor(0);
+        }
+
+        String text = String(index + 1) + ". " + clipboardPopupEntries[index].preview;
+        text = GUI::truncateStringToWidth(text, max(1, popupTextWidth));
+        u8g2.drawUTF8(popupX + 4, itemY, text.c_str());
+        u8g2.setDrawColor(1);
+    }
+
+    if (static_cast<int>(clipboardPopupEntries.size()) > visibleRows) {
+        GUI::drawScrollbar(popupX + popupWidth - GUI::SCROLLBAR_WIDTH - 1,
+                           popupY + 2,
+                           popupHeight - 4,
+                           static_cast<int>(clipboardPopupEntries.size()),
+                           visibleRows,
+                           clipboardPopupScroll);
+    }
 }
 
 String T9EditorApp::readDocumentSlice(int start, int length) const {
@@ -749,28 +1374,16 @@ void T9EditorApp::showReadWriteCapToast() const {
 }
 
 bool T9EditorApp::tryInsertTextAtCursor(const String& text, int cursorAdvance) {
-    if (sourceKind == SOURCE_PAGED_FILE && !isReadOnly() &&
-        static_cast<size_t>(documentBuffer.length() + text.length()) > kT9EditorReadWriteMaxBytes) {
-        showReadWriteCapToast();
-        return false;
-    }
-
-    documentBuffer = documentBuffer.substring(0, cursorPos) + text + documentBuffer.substring(cursorPos);
-    cursorPos += cursorAdvance;
-    return true;
+    return replaceDocumentRange(cursorPos, cursorPos, text, cursorPos + cursorAdvance, true);
 }
 
 bool T9EditorApp::tryInsertCharWithAutoBracket(char c) {
     char right = getMatchingBracket(c);
-    size_t addedBytes = right != '\0' ? 2U : 1U;
-    if (sourceKind == SOURCE_PAGED_FILE && !isReadOnly() &&
-        static_cast<size_t>(documentBuffer.length()) + addedBytes > kT9EditorReadWriteMaxBytes) {
-        showReadWriteCapToast();
-        return false;
+    String insertText = String(c);
+    if (right != '\0') {
+        insertText += right;
     }
-
-    insertCharWithAutoBracket(documentBuffer, cursorPos, c);
-    return true;
+    return replaceDocumentRange(cursorPos, cursorPos, insertText, cursorPos + 1, true);
 }
 
 bool T9EditorApp::statPagedDocument(size_t& fileSize, String& error) const {
@@ -903,6 +1516,12 @@ String T9EditorApp::getDocumentManifestPath() const {
     return getDocumentHistoryRoot() + "/manifest.txt";
 }
 
+String T9EditorApp::getHistorySnapshotPath(unsigned long snapshotId) const {
+    char name[40];
+    snprintf(name, sizeof(name), "%06lu.txt", snapshotId);
+    return getDocumentHistoryRoot() + "/" + String(name);
+}
+
 String T9EditorApp::getClipboardManifestPath() const {
     return getClipboardRoot() + "/manifest.txt";
 }
@@ -970,6 +1589,7 @@ bool T9EditorApp::ensureHistoryDocument(String& error) {
                     historyDocumentId = entryName;
                     String nextValue = manifestValue(manifest, "next_snapshot");
                     historyNextSnapshotId = nextValue.length() > 0 ? static_cast<unsigned long>(nextValue.toInt()) : 1UL;
+                    activeHistorySnapshotId = historyNextSnapshotId > 1 ? historyNextSnapshotId - 1 : 0;
                     break;
                 }
             }
@@ -979,6 +1599,7 @@ bool T9EditorApp::ensureHistoryDocument(String& error) {
         if (historyDocumentId.length() == 0) {
             historyDocumentId = buildDefaultHistoryDocumentId();
             historyNextSnapshotId = 1;
+            activeHistorySnapshotId = 0;
         }
     }
 
@@ -1015,14 +1636,13 @@ bool T9EditorApp::recordPageSnapshot(const char* reason, String& error) {
         return false;
     }
 
-    char name[40];
-    snprintf(name, sizeof(name), "%06lu.txt", historyNextSnapshotId);
-    String snapshotPath = getDocumentHistoryRoot() + "/" + String(name);
+    String snapshotPath = getHistorySnapshotPath(historyNextSnapshotId);
     if (!writeSmallFileUnlocked(snapshotPath, documentBuffer, error)) {
         return false;
     }
 
     historyNextSnapshotId++;
+    activeHistorySnapshotId = historyNextSnapshotId - 1;
     String manifest = "path=" + documentPath + "\n";
     manifest += "label=" + documentLabel + "\n";
     manifest += "alias=" + documentPath + "\n";
@@ -1038,10 +1658,6 @@ bool T9EditorApp::recordPageSnapshot(const char* reason, String& error) {
 }
 
 bool T9EditorApp::loadClipboardState(String& error) {
-    if (sourceKind != SOURCE_PAGED_FILE) {
-        error = "";
-        return true;
-    }
     if (!ensureEditorStorage(error)) {
         return false;
     }
@@ -1085,11 +1701,6 @@ bool T9EditorApp::loadClipboardState(String& error) {
 }
 
 bool T9EditorApp::storeClipboardState(String& error) {
-    if (sourceKind != SOURCE_PAGED_FILE) {
-        error = "";
-        return true;
-    }
-
     EditorSdSessionGuard session;
     if (!session.begin()) {
         error = "Failed to open SD session";
@@ -1138,10 +1749,6 @@ bool T9EditorApp::writeClipboardSlot(const String& content, int& writtenSlot, St
 
 bool T9EditorApp::readClipboardSlot(int slot, String& content, String& error) const {
     content = "";
-    if (sourceKind != SOURCE_PAGED_FILE) {
-        error = "Clipboard unavailable for buffer sessions";
-        return false;
-    }
     if (slot < 1 || slot > kClipboardSlotCount) {
         error = "Clipboard slot is out of range";
         return false;
@@ -1355,7 +1962,7 @@ bool T9EditorApp::showLineNumbers() const {
 
 int T9EditorApp::getVisibleLineCount() const {
     int textTop = showHeader() ? 13 : 1;
-    int textBottom = showFooter() ? 53 : 63;
+    int textBottom = getTextBottomY();
     const GUI::FontMetrics& metrics = getCurrentFontMetrics();
     int visible = (textBottom - textTop + 1) / metrics.lineHeight;
     return max(1, visible);
@@ -1631,6 +2238,92 @@ void T9EditorApp::handleInput(char key) {
         return;
     }
 
+    if (clipboardPopupActive) {
+        handleClipboardPopupInput(key);
+        return;
+    }
+
+    if (selectionMode) {
+        if (key == KEY_SHIFT) {
+            if (isKeyHeld(KEY_SHIFT)) {
+                shiftTapPending = false;
+                closeClipboardPopup();
+                exitSelectionMode();
+                recalculateLayout();
+            } else {
+                shiftTapPending = true;
+            }
+            return;
+        }
+
+        if (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT) {
+            cursorMoveTime = millis();
+            if (key == KEY_UP || key == KEY_DOWN) {
+                moveCursorVertically(key == KEY_UP ? -1 : 1);
+            } else {
+                if (key == KEY_LEFT && cursorPos > 0) cursorPos--;
+                if (key == KEY_RIGHT && cursorPos < getDocumentLength()) cursorPos++;
+            }
+            syncSelectionFocusToCursor();
+            recalculateLayout();
+            return;
+        }
+
+        if (key == KEY_ESC) {
+            exitSelectionMode();
+            recalculateLayout();
+            return;
+        }
+
+        if (key == KEY_BKSP) {
+            if (!hasSelectionRange()) {
+                GUI::showToast("No selection", 1500);
+                return;
+            }
+            const int start = getSelectionStart();
+            const int end = getSelectionEnd();
+            if (removeDocumentRange(start, end, true)) {
+                clearTransientInputState();
+                markPageDirty();
+                exitSelectionMode();
+                recalculateLayout();
+            }
+            return;
+        }
+
+        if (key == '1') {
+            copySelectionToClipboard(false);
+            recalculateLayout();
+            return;
+        }
+        if (key == '2') {
+            if (copySelectionToClipboard(true)) {
+                recalculateLayout();
+            }
+            return;
+        }
+        if (key == '3') {
+            if (openClipboardPopup()) {
+                recalculateLayout();
+            }
+            return;
+        }
+        if (key == '7') {
+            if (undoEdit()) {
+                recalculateLayout();
+            }
+            return;
+        }
+        if (key == '9') {
+            if (redoEdit()) {
+                recalculateLayout();
+            }
+            return;
+        }
+
+        return;
+    }
+
     bool layoutChanged = false;
 
     if (!isReadOnly() && zeroPending && key != '0') {
@@ -1820,7 +2513,11 @@ void T9EditorApp::handleInput(char key) {
     if (key == KEY_SHIFT) {
         if (isKeyHeld(KEY_SHIFT)) {
             shiftTapPending = false;
-            selectionMode = !selectionMode;
+            if (selectionMode) {
+                exitSelectionMode();
+            } else {
+                enterSelectionMode();
+            }
             recalculateLayout();
         } else {
             shiftTapPending = true;
@@ -1835,9 +2532,9 @@ void T9EditorApp::handleInput(char key) {
                 tapKey = '\0';
                 tapIndex = 0;
             } else if (cursorPos > 0) {
-                documentBuffer.remove(cursorPos - 1, 1);
-                cursorPos--;
-                markPageDirty();
+                if (removeDocumentRange(cursorPos - 1, cursorPos, true)) {
+                    markPageDirty();
+                }
                 if (fallback && cursorPos <= fallbackStart) {
                     fallback = false;
                 }
@@ -1853,14 +2550,14 @@ void T9EditorApp::handleInput(char key) {
                 t9predict.popDigit();
                 singleKeyCycleIndex = 0;
             } else if (cursorPos > 0) {
-                documentBuffer.remove(cursorPos - 1, 1);
-                cursorPos--;
-                markPageDirty();
+                if (removeDocumentRange(cursorPos - 1, cursorPos, true)) {
+                    markPageDirty();
+                }
             }
         } else if (cursorPos > 0) {
-            documentBuffer.remove(cursorPos - 1, 1);
-            cursorPos--;
-            markPageDirty();
+            if (removeDocumentRange(cursorPos - 1, cursorPos, true)) {
+                markPageDirty();
+            }
         }
         recalculateLayout();
         return;
@@ -2059,6 +2756,10 @@ void T9EditorApp::update() {
 void T9EditorApp::recalculateLayout() {
     visualLines.clear();
 
+    if (selectionMode) {
+        syncSelectionFocusToCursor();
+    }
+
     String preview;
     String displayText = getDisplayText(&preview);
     u8g2.setFont(getCurrentFontMetrics().font);
@@ -2170,6 +2871,13 @@ void T9EditorApp::renderFooter() const {
         return;
     }
 
+    if (selectionMode) {
+        String text = GUI::truncateStringToWidth(String("arr:sel 1,2,3 cp,mv,ps 7,9 u/r"),
+                                                GUI::SCREEN_WIDTH - 2);
+        u8g2.drawUTF8(1, footerBaselineY, text.c_str());
+        return;
+    }
+
     if (fallback && tapKey != '\0') {
         const char* map = multiTapMap[tapKey - '0'];
         char bar[32];
@@ -2226,12 +2934,6 @@ void T9EditorApp::renderFooter() const {
         String text = GUI::truncateStringToWidth(String(hint), GUI::SCREEN_WIDTH - 2);
         u8g2.drawUTF8(1, footerBaselineY, text.c_str());
     }
-
-    if (selectionMode) {
-        const char* tag = "SEL";
-        int tagWidth = u8g2.getStrWidth(tag);
-        u8g2.drawStr(GUI::SCREEN_WIDTH - tagWidth - 1, footerBaselineY, tag);
-    }
 }
 
 void T9EditorApp::renderSavePrompt() {
@@ -2248,7 +2950,7 @@ void T9EditorApp::render() {
     int gutterWidth = getGutterWidth(logicalLineCount);
     int textLeft = getTextLeft(logicalLineCount);
     int textTop = showHeader() ? 13 : 1;
-    int textBottom = showFooter() ? 53 : 63;
+    int textBottom = getTextBottomY();
     int visibleLines = getVisibleLineCount();
     const GUI::FontMetrics& metrics = getCurrentFontMetrics();
 
@@ -2265,6 +2967,10 @@ void T9EditorApp::render() {
         fbDispEnd = cursorPos + (int)preview.length();
     }
 
+    const bool selectionVisible = hasSelectionRange();
+    const int selectionStart = selectionVisible ? getSelectionStart() : -1;
+    const int selectionEnd = selectionVisible ? getSelectionEnd() : -1;
+
     int y = textTop + metrics.baselineOffset;
     for (int i = 0; i < visibleLines; i++) {
         int idx = scrollOffset + i;
@@ -2277,7 +2983,42 @@ void T9EditorApp::render() {
             u8g2.drawStr(1, y, ln);
         }
 
-        if (fbDispStart >= 0 && fbDispStart < vl.byteStartIndex + vl.byteLength && fbDispEnd > vl.byteStartIndex) {
+        bool selectionRendered = false;
+        if (selectionVisible && vl.byteLength == 0 &&
+            selectionStart <= vl.byteStartIndex && selectionEnd > vl.byteStartIndex) {
+            u8g2.drawBox(textLeft, y - metrics.glyphTopOffset, 3, metrics.boxHeight);
+            selectionRendered = true;
+        } else if (selectionVisible && selectionStart < vl.byteStartIndex + vl.byteLength &&
+                   selectionEnd > vl.byteStartIndex) {
+            int regionS = max(selectionStart, vl.byteStartIndex) - vl.byteStartIndex;
+            int regionE = min(selectionEnd, vl.byteStartIndex + vl.byteLength) - vl.byteStartIndex;
+            if (regionS > 0) {
+                String before = vl.content.substring(0, regionS);
+                u8g2.drawUTF8(textLeft, y, before.c_str());
+            }
+
+            String selectedText = vl.content.substring(regionS, regionE);
+            int selectedX = textLeft + u8g2.getUTF8Width(vl.content.substring(0, regionS).c_str());
+            int selectedWidth = u8g2.getUTF8Width(selectedText.c_str());
+            if (selectedWidth < 1) {
+                selectedWidth = 3;
+            }
+            u8g2.drawBox(selectedX, y - metrics.glyphTopOffset, selectedWidth, metrics.boxHeight);
+            u8g2.setDrawColor(0);
+            if (selectedText.length() > 0) {
+                u8g2.drawUTF8(selectedX, y, selectedText.c_str());
+            }
+            u8g2.setDrawColor(1);
+
+            if (regionE < (int)vl.content.length()) {
+                String after = vl.content.substring(regionE);
+                u8g2.drawUTF8(selectedX + selectedWidth, y, after.c_str());
+            }
+            selectionRendered = true;
+        }
+
+        if (!selectionRendered &&
+            fbDispStart >= 0 && fbDispStart < vl.byteStartIndex + vl.byteLength && fbDispEnd > vl.byteStartIndex) {
             int regionS = max(fbDispStart, vl.byteStartIndex) - vl.byteStartIndex;
             int regionE = min(fbDispEnd, vl.byteStartIndex + vl.byteLength) - vl.byteStartIndex;
             if (regionS > 0) {
@@ -2297,7 +3038,7 @@ void T9EditorApp::render() {
                 String after = vl.content.substring(regionE);
                 u8g2.drawUTF8(xFb + wFb, y, after.c_str());
             }
-        } else {
+        } else if (!selectionRendered) {
             u8g2.drawUTF8(textLeft, y, vl.content.c_str());
         }
 
@@ -2322,6 +3063,7 @@ void T9EditorApp::render() {
     }
 
     renderFooter();
+    renderClipboardPopup();
     if (GUI::updateToast()) return;
     if (savePromptActive) renderSavePrompt();
 }

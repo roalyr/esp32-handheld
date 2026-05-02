@@ -2,7 +2,7 @@
 // MODULE: src/gui.h
 // STATUS: [Level 2 - Implementation]
 // TRUTH_LINK: TACTICAL_TODO TASK_2
-// LOG_REF: 2026-04-30
+// LOG_REF: 2026-05-02
 
 #ifndef GUI_H
 #define GUI_H
@@ -257,9 +257,10 @@ void showToast(const char* message, unsigned long durationMs = 2000);
 
 /**
  * Update and render active toast. Call in render loop.
+ * @param footerTopY Top Y position of the current footer area, or SCREEN_HEIGHT when no footer is visible
  * @return true if a toast is currently visible
  */
-bool updateToast();
+bool updateToast(int footerTopY = -1);
 
 /**
  * Clear any active toast immediately.

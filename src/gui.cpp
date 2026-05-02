@@ -2,7 +2,7 @@
 // MODULE: src/gui.cpp
 // STATUS: [Level 2 - Implementation]
 // TRUTH_LINK: TACTICAL_TODO TASK_2
-// LOG_REF: 2026-04-30
+// LOG_REF: 2026-05-02
 
 #include "gui.h"
 #include "hal.h"
@@ -534,21 +534,33 @@ void showToast(const char* message, unsigned long durationMs) {
     toastEndTime = millis() + durationMs;
 }
 
-bool updateToast() {
+bool updateToast(int footerTopY) {
     if (toastMessage.length() == 0 || millis() > toastEndTime) {
         toastMessage = "";
         return false;
     }
-    
+
+    if (footerTopY < 0 || footerTopY > SCREEN_HEIGHT) {
+        footerTopY = getFooterSeparatorY();
+    }
+
     setFontSystem();
+    const FontMetrics& metrics = getSystemFontMetrics();
     String message = truncateStringToWidth(toastMessage, SCREEN_WIDTH - 12);
     int msgWidth = u8g2.getUTF8Width(message.c_str());
     int boxWidth = msgWidth + 8;
     int boxX = (SCREEN_WIDTH - boxWidth) / 2;
-    int boxY = getFooterSeparatorY() - getSystemFontMetrics().boxHeight - 2;
-    
-    u8g2.drawFrame(boxX, boxY, boxWidth, getSystemFontMetrics().boxHeight + 2);
-    u8g2.drawUTF8(boxX + 4, boxY + getSystemFontMetrics().baselineOffset + 1, message.c_str());
+    int boxHeight = metrics.boxHeight + 4;
+    int boxY = footerTopY - boxHeight - 1;
+    if (boxY < 0) {
+        boxY = 0;
+    }
+
+    u8g2.setDrawColor(0);
+    u8g2.drawBox(boxX, boxY, boxWidth, boxHeight);
+    u8g2.setDrawColor(1);
+    u8g2.drawFrame(boxX, boxY, boxWidth, boxHeight);
+    u8g2.drawUTF8(boxX + 4, boxY + metrics.baselineOffset + 2, message.c_str());
     
     return true;
 }

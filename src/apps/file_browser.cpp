@@ -1,6 +1,9 @@
-// [Revision: v3.0] [Path: src/apps/file_browser.cpp] [Date: 2025-12-11]
-// Description: SPIFFS file browser - refactored for clarity.
-//              Organized into: initialization, file operations, input handling, rendering.
+// PROJECT: ESP32-S2-Mini handheld terminal
+// MODULE: src/apps/file_browser.cpp
+// STATUS: [Level 2 - Implementation]
+// TRUTH_LINK: TACTICAL_TODO TASK_2
+// LOG_REF: 2026-05-02
+// Description: File browser app with footer-aware toast rendering.
 
 #include "file_browser.h"
 #include "../gui.h"
@@ -457,7 +460,8 @@ void FileBrowserApp::renderFooter() {
 void FileBrowserApp::renderToast() {
     if (saveMessage.length() > 0 && millis() < saveMessageUntil) {
         GUI::showToast(saveMessage.c_str(), 0);
-        GUI::updateToast();
+        const int footerTopY = (menuState == MENU_CLOSED) ? GUI::getFooterSeparatorY() : GUI::SCREEN_HEIGHT;
+        GUI::updateToast(footerTopY);
     } else if (saveMessageUntil != 0 && millis() >= saveMessageUntil) {
         saveMessage = "";
         saveMessageUntil = 0;

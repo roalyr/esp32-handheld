@@ -893,7 +893,6 @@ bool T9EditorApp::undoFromHistory() {
         if (cursorPos > getDocumentLength()) {
             cursorPos = getDocumentLength();
         }
-        exitSelectionMode();
         clearTransientInputState();
         closeClipboardPopup();
         activeHistorySnapshotId = candidate;
@@ -909,8 +908,14 @@ bool T9EditorApp::undoEdit() {
         GUI::showToast("RO action blocked", 1500);
         return false;
     }
+    const bool selectionWasActive = selectionMode;
     if (undoStack.empty()) {
         if (undoFromHistory()) {
+            if (selectionWasActive) {
+                enterSelectionMode();
+            } else {
+                exitSelectionMode();
+            }
             return true;
         }
         GUI::showToast("Nothing to undo", 1500);
@@ -921,6 +926,11 @@ bool T9EditorApp::undoEdit() {
     EditorUndoState state = undoStack.back();
     undoStack.pop_back();
     restoreUndoState(state);
+    if (selectionWasActive) {
+        enterSelectionMode();
+    } else {
+        exitSelectionMode();
+    }
     return true;
 }
 
@@ -929,6 +939,7 @@ bool T9EditorApp::redoEdit() {
         GUI::showToast("RO action blocked", 1500);
         return false;
     }
+    const bool selectionWasActive = selectionMode;
     if (redoStack.empty()) {
         GUI::showToast("Nothing to redo", 1500);
         return false;
@@ -938,6 +949,11 @@ bool T9EditorApp::redoEdit() {
     EditorUndoState state = redoStack.back();
     redoStack.pop_back();
     restoreUndoState(state);
+    if (selectionWasActive) {
+        enterSelectionMode();
+    } else {
+        exitSelectionMode();
+    }
     return true;
 }
 
@@ -2872,7 +2888,7 @@ void T9EditorApp::renderFooter() const {
     }
 
     if (selectionMode) {
-        String text = GUI::truncateStringToWidth(String("arr:sel 1,2,3 cp,mv,ps 7,9 u/r"),
+        String text = GUI::truncateStringToWidth(String("SEL ON 1,2,3:text ops 7,9:hist"),
                                                 GUI::SCREEN_WIDTH - 2);
         u8g2.drawUTF8(1, footerBaselineY, text.c_str());
         return;
@@ -3064,6 +3080,7 @@ void T9EditorApp::render() {
 
     renderFooter();
     renderClipboardPopup();
-    if (GUI::updateToast()) return;
+    const int toastFooterTopY = showFooter() ? GUI::getFooterSeparatorY() : GUI::SCREEN_HEIGHT;
+    if (GUI::updateToast(toastFooterTopY)) return;
     if (savePromptActive) renderSavePrompt();
 }

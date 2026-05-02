@@ -3,7 +3,7 @@
 // STATUS: [Level 2 - Implementation]
 // TRUTH_LINK: TACTICAL_TODO TASK_1
 // LOG_REF: 2026-04-30
-// Description: Canonical T9 editor/viewer app with predictive input and paged-file startup.
+// Description: Canonical T9 editor/viewer app with predictive input, split RO paging, and capped RW file editing.
 
 #include "t9_editor.h"
 #include "../app_transfer.h"
@@ -26,17 +26,11 @@ static const size_t kEditorRecordSize = 2048;
 static const size_t kEditorRecordPayloadBytes = kEditorRecordSize - sizeof(EditorRecordHeader);
 static const uint32_t kEditorRecordMagic = 0x54494348UL;
 static const uint32_t kEditorRecordVersion = 1;
-static const uint32_t kEditorRecordKindSessionChunk = 1;
-static const uint32_t kEditorRecordKindHistorySnapshot = 2;
 static const uint32_t kEditorRecordKindClipboardSlot = 3;
-static const uint32_t kEditorRecordFlagDirtyExport = 1UL << 0;
 static const int kClipboardSlotCount = 12;
 static const char* kEditorSystemRoot = "/.t9sys";
-static const char* kEditorWorkRoot = "/.t9sys/work";
 static const char* kEditorHistoryRoot = "/.t9sys/history";
 static const char* kEditorClipboardRoot = "/.t9sys/clipboard";
-static const char* kEditorRewriteTempPath = "/.t9sys/rewrite.tmp";
-static const char* kEditorRewriteBackupPath = "/.t9sys/rewrite.bak";
 const size_t kT9EditorReadOnlyPageSizeOptions[] = {2048, 1024, 512, 256};
 const int kT9EditorReadOnlyPageSizeOptionCount = 4;
 const char* kT9EditorFontSizeOptionLabels[] = {"Medium", "Small", "Tiny"};
@@ -282,15 +276,6 @@ static bool manifestContainsAlias(const String& manifest, const String& path) {
         start = end + 1;
     }
     return false;
-}
-
-static uint32_t snapshotReasonFlags(const char* reason) {
-    if (!reason) return 0;
-    if (strcmp(reason, "page_load") == 0) return 1;
-    if (strcmp(reason, "page_leave") == 0) return 2;
-    if (strcmp(reason, "page_save") == 0) return 3;
-    if (strcmp(reason, "save") == 0) return 4;
-    return 0;
 }
 
 static bool writeFixedRecordUnlocked(const String& path,
@@ -602,8 +587,6 @@ T9EditorApp::T9EditorApp() {
     openMode = OPEN_READ_WRITE;
     sourceKind = SOURCE_BUFFER;
     sourcePageSize = static_cast<int>(getT9EditorReadOnlyPageBytes());
-    sessionExportDirty = false;
-    sessionSourceSize = 0;
     documentLabel = "T9 EDITOR";
     documentPath = "";
     sourceBuffer = "";
@@ -730,10 +713,6 @@ void T9EditorApp::resetEditorSession() {
 
 void T9EditorApp::resetPagedSession() {
     sourcePageSize = static_cast<int>(getT9EditorReadOnlyPageBytes());
-    sessionExportDirty = false;
-    sessionSourceSize = 0;
-    pageStartOffset = 0;
-    pageOriginalLength = 0;
     pagedDocumentSize = 0;
     currentPageIndex = 0;
     totalPageCount = 0;
@@ -741,9 +720,6 @@ void T9EditorApp::resetPagedSession() {
     historyDocumentId = "";
     historyNextSnapshotId = 1;
     nextClipboardSlot = 1;
-    pagePromptActive = false;
-    pagePromptSelection = 0;
-    pendingPageAction = PAGED_ACTION_NONE;
 }
 
 String T9EditorApp::readDocumentSlice(int start, int length) const {
@@ -910,35 +886,12 @@ String T9EditorApp::getEditorSystemRoot() const {
     return String(kEditorSystemRoot);
 }
 
-String T9EditorApp::getWorkRoot() const {
-    return String(kEditorWorkRoot);
-}
-
 String T9EditorApp::getHistoryRoot() const {
     return String(kEditorHistoryRoot);
 }
 
 String T9EditorApp::getClipboardRoot() const {
     return String(kEditorClipboardRoot);
-}
-
-String T9EditorApp::getSessionRoot() const {
-    String docId = historyDocumentId.length() > 0 ? historyDocumentId : buildDefaultHistoryDocumentId();
-    return getWorkRoot() + "/" + docId;
-}
-
-String T9EditorApp::getSessionManifestPath() const {
-    return getSessionRoot() + "/manifest.txt";
-}
-
-String T9EditorApp::getSessionChunkRoot() const {
-    return getSessionRoot() + "/chunks";
-}
-
-String T9EditorApp::getSessionChunkPath(int pageIndex) const {
-    char name[20];
-    snprintf(name, sizeof(name), "%04d.bin", pageIndex + 1);
-    return getSessionChunkRoot() + "/" + String(name);
 }
 
 String T9EditorApp::getDocumentHistoryRoot() const {
@@ -967,263 +920,6 @@ String T9EditorApp::buildDefaultHistoryDocumentId() const {
     return base + "_" + hash;
 }
 
-bool T9EditorApp::loadSessionManifest(String& error) {
-    size_t sourceFileSize = 0;
-    if (!statPagedDocument(sourceFileSize, error)) {
-        return false;
-    }
-
-    sourcePageSize = static_cast<int>(kEditorRecordPayloadBytes);
-    EditorSdSessionGuard session;
-    if (!session.begin()) {
-        error = "Failed to open SD session";
-        return false;
-    }
-
-    if (!sdFat.exists(getSessionManifestPath().c_str())) {
-        sessionSourceSize = sourceFileSize;
-        sessionExportDirty = false;
-        updatePagedDocumentMetrics(sourceFileSize);
-        return storeSessionManifest(error);
-    }
-
-    String manifest;
-    if (!readSmallFileUnlocked(getSessionManifestPath(), manifest, error)) {
-        return false;
-    }
-
-    const String logicalValue = manifestValue(manifest, "logical_size");
-    const String sourceValue = manifestValue(manifest, "source_size");
-    const String chunkValue = manifestValue(manifest, "chunk_count");
-    pagedDocumentSize = logicalValue.length() > 0
-                        ? static_cast<size_t>(strtoul(logicalValue.c_str(), nullptr, 10))
-                        : sourceFileSize;
-    sessionSourceSize = sourceValue.length() > 0
-                        ? static_cast<size_t>(strtoul(sourceValue.c_str(), nullptr, 10))
-                        : sourceFileSize;
-    totalPageCount = chunkValue.length() > 0 ? chunkValue.toInt() : 0;
-    if (totalPageCount < 1) {
-        updatePagedDocumentMetrics(sessionSourceSize);
-    } else if (currentPageIndex >= totalPageCount) {
-        currentPageIndex = totalPageCount - 1;
-    }
-    if (pagedDocumentSize == 0 && sessionSourceSize > 0) {
-        pagedDocumentSize = sessionSourceSize;
-    }
-    sessionExportDirty = manifestValue(manifest, "dirty_export") == "1";
-    error = "";
-    return true;
-}
-
-bool T9EditorApp::storeSessionManifest(String& error) const {
-    String manifest = "path=" + documentPath + "\n";
-    manifest += "label=" + documentLabel + "\n";
-    manifest += "logical_size=" + String(static_cast<unsigned long>(pagedDocumentSize)) + "\n";
-    manifest += "source_size=" + String(static_cast<unsigned long>(sessionSourceSize)) + "\n";
-    manifest += "chunk_count=" + String(max(1, totalPageCount)) + "\n";
-    manifest += "payload_bytes=" + String(sourcePageSize) + "\n";
-    manifest += "record_bytes=" + String(static_cast<unsigned long>(kEditorRecordSize)) + "\n";
-    manifest += "dirty_export=" + String(sessionExportDirty ? 1 : 0) + "\n";
-    return writeSmallFileUnlocked(getSessionManifestPath(), manifest, error);
-}
-
-bool T9EditorApp::ensureSessionWorkspace(String& error) {
-    if (sourceKind != SOURCE_PAGED_FILE) {
-        error = "";
-        return true;
-    }
-    if (!ensureEditorStorage(error)) {
-        return false;
-    }
-
-    EditorSdSessionGuard session;
-    if (!session.begin()) {
-        error = "Failed to open SD session";
-        return false;
-    }
-
-    if (!ensureDirectoryChainUnlocked(getSessionRoot(), error)) return false;
-    if (!ensureDirectoryChainUnlocked(getSessionChunkRoot(), error)) return false;
-    return loadSessionManifest(error);
-}
-
-bool T9EditorApp::writeSessionChunk(int pageIndex, const String& content, size_t documentLength, String& error) {
-    if (static_cast<size_t>(content.length()) > kEditorRecordPayloadBytes) {
-        error = "Page content exceeds fixed chunk payload size";
-        return false;
-    }
-    if (!ensureSessionWorkspace(error)) {
-        return false;
-    }
-
-    const uint32_t flags = sessionExportDirty ? kEditorRecordFlagDirtyExport : 0;
-    return writeFixedRecordUnlocked(getSessionChunkPath(pageIndex),
-                                    kEditorRecordKindSessionChunk,
-                                    static_cast<uint32_t>(pageIndex),
-                                    static_cast<uint32_t>(documentLength),
-                                    flags,
-                                    content,
-                                    error);
-}
-
-bool T9EditorApp::loadSessionChunk(int pageIndex, String& error) {
-    if (!ensureSessionWorkspace(error)) {
-        return false;
-    }
-
-    EditorSdSessionGuard session;
-    if (!session.begin()) {
-        error = "Failed to open SD session";
-        return false;
-    }
-
-    String chunkPath = getSessionChunkPath(pageIndex);
-    if (!sdFat.exists(chunkPath.c_str())) {
-        const size_t start = static_cast<size_t>(pageIndex) * static_cast<size_t>(sourcePageSize);
-        size_t length = 0;
-        if (sessionSourceSize > start) {
-            const size_t remaining = sessionSourceSize - start;
-            length = remaining < static_cast<size_t>(sourcePageSize) ? remaining : static_cast<size_t>(sourcePageSize);
-        }
-
-        String chunkText;
-        if (!readFileRange(start, length, chunkText, error)) {
-            return false;
-        }
-        if (!writeSessionChunk(pageIndex, chunkText, pagedDocumentSize, error)) {
-            return false;
-        }
-    }
-
-    String chunkText;
-    uint32_t recordDocumentLength = 0;
-    uint32_t flags = 0;
-    if (!readFixedRecordUnlocked(chunkPath,
-                                 kEditorRecordKindSessionChunk,
-                                 static_cast<uint32_t>(pageIndex),
-                                 chunkText,
-                                 recordDocumentLength,
-                                 flags,
-                                 error)) {
-        return false;
-    }
-
-    documentBuffer = chunkText;
-    pageStartOffset = static_cast<size_t>(pageIndex) * static_cast<size_t>(sourcePageSize);
-    pageOriginalLength = static_cast<size_t>(chunkText.length());
-    currentPageIndex = pageIndex;
-    pageDirty = false;
-    if (recordDocumentLength > 0) {
-        pagedDocumentSize = static_cast<size_t>(recordDocumentLength);
-    }
-    sessionExportDirty = ((flags & kEditorRecordFlagDirtyExport) != 0) || sessionExportDirty;
-    error = "";
-    return true;
-}
-
-bool T9EditorApp::exportPagedDocument(String& error) {
-    if (sourceKind != SOURCE_PAGED_FILE) {
-        error = "";
-        return true;
-    }
-    if (isReadOnly()) {
-        error = "Document is read-only";
-        return false;
-    }
-    if (!ensureSessionWorkspace(error)) {
-        return false;
-    }
-
-    EditorSdSessionGuard session;
-    if (!session.begin()) {
-        error = "Failed to open SD session";
-        return false;
-    }
-    if (!ensureDirectoryChainUnlocked(getEditorSystemRoot(), error)) {
-        return false;
-    }
-
-    sdFat.remove(kEditorRewriteTempPath);
-    sdFat.remove(kEditorRewriteBackupPath);
-
-    FsFile dst;
-    if (!dst.open(kEditorRewriteTempPath, O_WRONLY | O_CREAT | O_TRUNC)) {
-        error = String("Failed to open temp file for write: ") + kEditorRewriteTempPath;
-        return false;
-    }
-
-    size_t exportedLength = 0;
-    for (int pageIndex = 0; pageIndex < max(1, totalPageCount); pageIndex++) {
-        String chunkText;
-        String chunkPath = getSessionChunkPath(pageIndex);
-        if (sdFat.exists(chunkPath.c_str())) {
-            uint32_t recordDocumentLength = 0;
-            uint32_t flags = 0;
-            if (!readFixedRecordUnlocked(chunkPath,
-                                         kEditorRecordKindSessionChunk,
-                                         static_cast<uint32_t>(pageIndex),
-                                         chunkText,
-                                         recordDocumentLength,
-                                         flags,
-                                         error)) {
-                return false;
-            }
-        } else {
-            const size_t start = static_cast<size_t>(pageIndex) * static_cast<size_t>(sourcePageSize);
-            size_t length = 0;
-            if (sessionSourceSize > start) {
-                const size_t remaining = sessionSourceSize - start;
-                length = remaining < static_cast<size_t>(sourcePageSize) ? remaining : static_cast<size_t>(sourcePageSize);
-            }
-            if (!readFileRange(start, length, chunkText, error)) {
-                return false;
-            }
-        }
-
-        if (chunkText.length() > 0) {
-            size_t bytesWritten = dst.write(reinterpret_cast<const uint8_t*>(chunkText.c_str()),
-                                           static_cast<size_t>(chunkText.length()));
-            if (bytesWritten != static_cast<size_t>(chunkText.length())) {
-                error = "Failed to write exported document";
-                return false;
-            }
-            exportedLength += static_cast<size_t>(chunkText.length());
-        }
-    }
-
-    if (!dst.sync()) {
-        error = String("Failed to sync temp file: ") + kEditorRewriteTempPath;
-        return false;
-    }
-    dst.close();
-
-    if (sdFat.exists(documentPath.c_str()) && !sdFat.rename(documentPath.c_str(), kEditorRewriteBackupPath)) {
-        error = String("Failed to stage backup for: ") + documentPath;
-        return false;
-    }
-    if (!sdFat.rename(kEditorRewriteTempPath, documentPath.c_str())) {
-        sdFat.rename(kEditorRewriteBackupPath, documentPath.c_str());
-        error = String("Failed to replace file: ") + documentPath;
-        return false;
-    }
-    if (sdFat.exists(kEditorRewriteBackupPath)) {
-        sdFat.remove(kEditorRewriteBackupPath);
-    }
-
-    pagedDocumentSize = exportedLength;
-    sessionSourceSize = exportedLength;
-    sessionExportDirty = false;
-    if (currentPageIndex >= totalPageCount) {
-        currentPageIndex = max(0, totalPageCount - 1);
-    }
-    if (!storeSessionManifest(error)) {
-        return false;
-    }
-
-    error = "";
-    return true;
-}
-
 bool T9EditorApp::ensureEditorStorage(String& error) {
     EditorSdSessionGuard session;
     if (!session.begin()) {
@@ -1232,7 +928,6 @@ bool T9EditorApp::ensureEditorStorage(String& error) {
     }
 
     if (!ensureDirectoryChainUnlocked(getEditorSystemRoot(), error)) return false;
-    if (!ensureDirectoryChainUnlocked(getWorkRoot(), error)) return false;
     if (!ensureDirectoryChainUnlocked(getHistoryRoot(), error)) return false;
     if (!ensureDirectoryChainUnlocked(getClipboardRoot(), error)) return false;
     error = "";
@@ -1504,11 +1199,8 @@ bool T9EditorApp::saveCurrentPage(String& error) {
     }
 
     pagedDocumentSize = static_cast<size_t>(documentBuffer.length());
-    sessionSourceSize = pagedDocumentSize;
     updatePagedDocumentMetrics(pagedDocumentSize);
     pageDirty = false;
-    pageOriginalLength = pagedDocumentSize;
-    pageStartOffset = 0;
 
     if (!ensureHistoryDocument(error)) {
         return false;
@@ -1566,8 +1258,6 @@ bool T9EditorApp::loadPageByIndex(int pageIndex, String& error) {
 
             documentBuffer = sourceBuffer.substring(static_cast<unsigned int>(start),
                                                     static_cast<unsigned int>(start + length));
-            pageStartOffset = start;
-            pageOriginalLength = length;
             currentPageIndex = pageIndex;
             pageDirty = false;
             cursorPos = 0;
@@ -1598,8 +1288,6 @@ bool T9EditorApp::loadPageByIndex(int pageIndex, String& error) {
         }
 
         documentBuffer = pageText;
-        pageStartOffset = start;
-        pageOriginalLength = length;
         currentPageIndex = pageIndex;
         pageDirty = false;
         cursorPos = 0;
@@ -1627,8 +1315,6 @@ bool T9EditorApp::loadPageByIndex(int pageIndex, String& error) {
     }
 
     documentBuffer = fullText;
-    pageStartOffset = 0;
-    pageOriginalLength = fileSize;
     currentPageIndex = 0;
     pageDirty = false;
     cursorPos = 0;
@@ -1649,79 +1335,6 @@ bool T9EditorApp::hasPreviousPage() const {
 bool T9EditorApp::hasNextPage() const {
     if (isReadOnlyPaged()) return currentPageIndex + 1 < totalPageCount;
     return sourceKind == SOURCE_PAGED_FILE && currentPageIndex + 1 < totalPageCount;
-}
-
-void T9EditorApp::beginPendingPageAction(PendingPagedAction action) {
-    if (sourceKind != SOURCE_PAGED_FILE) return;
-    pendingPageAction = action;
-    pagePromptSelection = 0;
-    pagePromptActive = true;
-}
-
-void T9EditorApp::handlePagePromptInput(char key) {
-    if (key == KEY_ESC) {
-        pagePromptActive = false;
-        pendingPageAction = PAGED_ACTION_NONE;
-        pagePromptSelection = 0;
-        return;
-    }
-
-    if (key == KEY_LEFT || key == KEY_UP) {
-        if (pagePromptSelection > 0) pagePromptSelection--;
-        return;
-    }
-    if (key == KEY_RIGHT || key == KEY_DOWN || key == KEY_TAB) {
-        if (pagePromptSelection < 2) pagePromptSelection++;
-        return;
-    }
-
-    if (key != KEY_ENTER) return;
-
-    pagePromptActive = false;
-    if (pagePromptSelection == 2) {
-        pendingPageAction = PAGED_ACTION_NONE;
-        pagePromptSelection = 0;
-        return;
-    }
-
-    if (pagePromptSelection == 1) {
-        String leaveError;
-        if (!recordPageSnapshot("page_leave", leaveError)) {
-            Serial.printf("[T9Editor] Snapshot warning on leave: %s\n", leaveError.c_str());
-        }
-        String error;
-        int nextIndex = pendingPageAction == PAGED_ACTION_PREV_PAGE ? currentPageIndex - 1 : currentPageIndex + 1;
-        if (!loadPageByIndex(nextIndex, error)) {
-            GUI::showToast(error.c_str(), 2000);
-        } else {
-            cursorPos = pendingPageAction == PAGED_ACTION_PREV_PAGE ? getDocumentLength() : 0;
-            recalculateLayout();
-        }
-        pendingPageAction = PAGED_ACTION_NONE;
-        pagePromptSelection = 0;
-        return;
-    }
-
-    String saveError;
-    if (!recordPageSnapshot("page_leave", saveError)) {
-        Serial.printf("[T9Editor] Snapshot warning on leave: %s\n", saveError.c_str());
-    }
-    if (!saveCurrentPage(saveError)) {
-        GUI::showToast(saveError.c_str(), 2000);
-        pendingPageAction = PAGED_ACTION_NONE;
-        pagePromptSelection = 0;
-        return;
-    }
-
-    int nextIndex = pendingPageAction == PAGED_ACTION_PREV_PAGE ? currentPageIndex - 1 : currentPageIndex + 1;
-    if (!loadPageByIndex(nextIndex, saveError)) {
-        GUI::showToast(saveError.c_str(), 2000);
-    } else {
-        cursorPos = pendingPageAction == PAGED_ACTION_PREV_PAGE ? getDocumentLength() : 0;
-        recalculateLayout();
-    }
-    pendingPageAction = PAGED_ACTION_NONE;
-    pagePromptSelection = 0;
 }
 
 bool T9EditorApp::isReadOnly() const {
@@ -2013,11 +1626,6 @@ void T9EditorApp::handleSavePromptInput(char key) {
 }
 
 void T9EditorApp::handleInput(char key) {
-    if (pagePromptActive) {
-        handlePagePromptInput(key);
-        return;
-    }
-
     if (savePromptActive) {
         handleSavePromptInput(key);
         return;
@@ -2175,30 +1783,22 @@ void T9EditorApp::handleInput(char key) {
         }
         if (sourceKind == SOURCE_PAGED_FILE) {
             if (key == KEY_LEFT && cursorPos == 0 && hasPreviousPage()) {
-                if (!isReadOnly() && pageDirty) {
-                    beginPendingPageAction(PAGED_ACTION_PREV_PAGE);
+                String error;
+                if (!loadPageByIndex(currentPageIndex - 1, error)) {
+                    GUI::showToast(error.c_str(), 2000);
                 } else {
-                    String error;
-                    if (!loadPageByIndex(currentPageIndex - 1, error)) {
-                        GUI::showToast(error.c_str(), 2000);
-                    } else {
-                        cursorPos = getDocumentLength();
-                        recalculateLayout();
-                    }
+                    cursorPos = getDocumentLength();
+                    recalculateLayout();
                 }
                 return;
             }
             if (key == KEY_RIGHT && cursorPos == getDocumentLength() && hasNextPage()) {
-                if (!isReadOnly() && pageDirty) {
-                    beginPendingPageAction(PAGED_ACTION_NEXT_PAGE);
+                String error;
+                if (!loadPageByIndex(currentPageIndex + 1, error)) {
+                    GUI::showToast(error.c_str(), 2000);
                 } else {
-                    String error;
-                    if (!loadPageByIndex(currentPageIndex + 1, error)) {
-                        GUI::showToast(error.c_str(), 2000);
-                    } else {
-                        cursorPos = 0;
-                        recalculateLayout();
-                    }
+                    cursorPos = 0;
+                    recalculateLayout();
                 }
                 return;
             }
@@ -2639,11 +2239,6 @@ void T9EditorApp::renderSavePrompt() {
     GUI::drawThreeOptionDialog("Save changes?", labels, savePromptSelection);
 }
 
-void T9EditorApp::renderPagePrompt() {
-    const char* labels[3] = {"Save", "Discard", "Cancel"};
-    GUI::drawThreeOptionDialog("Dirty page", labels, pagePromptSelection);
-}
-
 void T9EditorApp::render() {
     renderHeader();
 
@@ -2728,6 +2323,5 @@ void T9EditorApp::render() {
 
     renderFooter();
     if (GUI::updateToast()) return;
-    if (pagePromptActive) renderPagePrompt();
     if (savePromptActive) renderSavePrompt();
 }

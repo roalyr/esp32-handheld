@@ -4,7 +4,7 @@
 - TECHNICAL_CONSTRAINTS:
   - TRUTH_PROJECT.md is not present in workspace; no additional constraints may be inferred beyond explicit Truth files.
 - ATOMIC_TASKS:
-  - [ ] TASK_1: Expose read-only versus read-write file opening clearly in the Lua file browser, enforce the new open policy, and move editor mode-cycling off raw Alt.
+  - [x] TASK_1: Expose read-only versus read-write file opening clearly in the Lua file browser, enforce the new open policy, and move editor mode-cycling off raw Alt.
     Required signatures:
     - src/lua_vm.cpp:
       - Keep ui.viewFile(path, label) and ui.editFile(path, label) as the canonical RO/RW launch bindings.
@@ -28,7 +28,7 @@
     - Alt+Tab must cycle T9/ABC/123 modes inside the editor.
     - Files larger than the global RW cap must be refused for RW open and remain available in RO mode.
 
-  - [ ] TASK_2: Replace the current paged-session core with a simple split architecture: a fixed-size RO pager for large files and a whole-buffer RW editor with whole-file SD snapshots.
+  - [x] TASK_2: Replace the current paged-session core with a simple split architecture: a fixed-size RO pager for large files and a whole-buffer RW editor with whole-file SD snapshots.
     Required signatures:
     - src/apps/t9_editor.h:
       - Simplify state so RO paging and capped RW whole-buffer editing use distinct helpers instead of the current `/.t9sys/work/` chunk-session model.
@@ -50,4 +50,4 @@
     - RW history must use whole-file snapshots on SD with sequence-based naming and compact manifests.
     - The broken page-save transition/footer corruption path from the current paged-session prototype must be removed from the active RW flow.
 
-  - [ ] VERIFICATION: Build with ~/.platformio/penv/bin/pio run -e lolin_s2_mini; flash with bash scripts/flash.sh per TRUTH_FLASHING.md; on-device verify that the file browser clearly shows Enter=RO and Alt+Enter=RW, large files open reliably in RO mode with the selected fixed page size and usable in-page scrolling, Settings exposes RO page size choices of 2048/1024/512/256 bytes with 512 as the default, RW opens are refused above the 16 KB cap with a clear message, capped RW files save correctly as whole files, raw Alt no longer cycles modes by itself, Alt+Tab cycles T9/ABC/123 modes, whole-file RW history snapshots are created on SD, and the earlier failures around invisible RO mode, broken page-save transitions, page-split mismatch, and missing final save persistence are resolved.
+  - [X] VERIFICATION: Build with ~/.platformio/penv/bin/pio run -e lolin_s2_mini; flash with bash scripts/flash.sh per TRUTH_FLASHING.md; on-device verify that the file browser clearly shows Enter=RO and Alt+Enter=RW, large files open reliably in RO mode with the selected fixed page size and usable in-page scrolling, Settings exposes RO page size choices of 2048/1024/512/256 bytes with 512 as the default, RW opens are refused above the 16 KB cap with a clear message, capped RW files save correctly as whole files, raw Alt no longer cycles modes by itself, Alt+Tab cycles T9/ABC/123 modes, whole-file RW history snapshots are created on SD, and the earlier failures around invisible RO mode, broken page-save transitions, page-split mismatch, and missing final save persistence are resolved.

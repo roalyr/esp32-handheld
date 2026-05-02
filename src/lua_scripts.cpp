@@ -10,33 +10,14 @@ const char LUA_DESKTOP[] = R"LUA(
 local GRID_COLS = 4
 local GRID_ROWS = 2
 local PAGE_SIZE = GRID_COLS * GRID_ROWS
-local TILE_W = 32
-local TILE_H = 20
-local DESKTOP_TOP = 13
-local TILE_PAD_X = 2
-local ICON_BOX_W = 28
-local ICON_BOX_H = 13
-local ICON_TARGET_W = 28
-local ICON_TARGET_H = 13
-local LABEL_BOX_Y = 14
-local LABEL_BOX_W = 28
-local LABEL_BASELINE_Y = 19
-local LABEL_CHAR_CAP = 7
-local LABEL_CHAR_W = 4
 
 local FILE_VIEW_FULL = 1
 local FILE_VIEW_DETAILS = 2
 local FILE_VIEW_MIN = 3
 
-local FONT_SMALL = 0
-local FONT_MEDIUM = 1
-local FONT_LARGE = 2
-local FONT_TINY = 3
-
-local CRASH_WRAP_WIDTH = 29
-local CRASH_LINE_HEIGHT = 6
-local CRASH_BODY_BASELINE_Y = 20
-local CRASH_VISIBLE_LINES = 6
+local FONT_TINY = gfx.tiny
+local FONT_SMALL = gfx.small
+local FONT_MEDIUM = gfx.medium
 
 local unpack_fn = unpack or table.unpack
 
@@ -103,6 +84,27 @@ local function truncate(value, limit)
         return value:sub(1, limit)
     end
     return value:sub(1, limit - 1) .. "~"
+end
+
+local function truncate_to_width(value, max_width)
+    value = tostring(value or "")
+    if gfx.textWidth(value) <= max_width then
+        return value
+    end
+    local suffix = "~"
+    while #value > 0 do
+        value = value:sub(1, #value - 1)
+        local candidate = value .. suffix
+        if gfx.textWidth(candidate) <= max_width then
+            return candidate
+        end
+    end
+    return suffix
+end
+
+local function char_capacity_for_width(max_width)
+    local char_width = math.max(1, gfx.textWidth("W"))
+    return math.max(1, math.floor(max_width / char_width))
 end
 
 local function marquee_text(value, visible_chars, tick)
@@ -243,13 +245,19 @@ local function is_valid_icon(icon)
 end
 
 local function draw_fallback_icon(tile_x, tile_y)
+    local layout = ui.metrics()
+    local tile_w = math.floor(layout.screen_width / GRID_COLS)
+    local tile_h = math.floor(layout.content_height / GRID_ROWS)
+    local tile_pad_x = layout.font == "tiny" and 1 or 2
+    local icon_box_w = tile_w - (tile_pad_x * 2)
+    local icon_box_h = tile_h - layout.box_height - 1
     local box_w = 11
     local box_h = 11
-    local draw_x = tile_x + TILE_PAD_X + math.floor((ICON_BOX_W - box_w) / 2)
-    local draw_y = tile_y + math.floor((ICON_BOX_H - box_h) / 2)
+    local draw_x = tile_x + tile_pad_x + math.floor((icon_box_w - box_w) / 2)
+    local draw_y = tile_y + math.floor((icon_box_h - box_h) / 2)
 
     gfx.rect(draw_x, draw_y, box_w, box_h)
-    gfx.setFont(FONT_SMALL)
+    gfx.setFont(layout.font)
     gfx.text(draw_x + 3, draw_y + 8, "?")
 end
 
@@ -263,6 +271,12 @@ local function sort_entries(entries)
 end
 
 local function draw_icon(icon, tile_x, tile_y)
+    local layout = ui.metrics()
+    local tile_w = math.floor(layout.screen_width / GRID_COLS)
+    local tile_h = math.floor(layout.content_height / GRID_ROWS)
+    local tile_pad_x = layout.font == "tiny" and 1 or 2
+    local icon_box_w = tile_w - (tile_pad_x * 2)
+    local icon_box_h = tile_h - layout.box_height - 1
     local normalized = normalize_icon(icon)
     if not normalized then
         draw_fallback_icon(tile_x, tile_y)
@@ -273,12 +287,12 @@ local function draw_icon(icon, tile_x, tile_y)
     local src_h = normalized.height
     local pixels = normalized.pixels
 
-    local target_w = math.min(ICON_TARGET_W, src_w)
-    local target_h = math.min(ICON_TARGET_H, src_h)
+    local target_w = math.min(icon_box_w, src_w)
+    local target_h = math.min(icon_box_h, src_h)
     local start_x = math.floor((src_w - target_w) / 2)
     local start_y = math.floor((src_h - target_h) / 2)
-    local draw_x = tile_x + TILE_PAD_X + math.floor((ICON_BOX_W - target_w) / 2)
-    local draw_y = tile_y + math.floor((ICON_BOX_H - target_h) / 2)
+    local draw_x = tile_x + tile_pad_x + math.floor((icon_box_w - target_w) / 2)
+    local draw_y = tile_y + math.floor((icon_box_h - target_h) / 2)
 
     for y = 0, target_h - 1 do
         for x = 0, target_w - 1 do
@@ -291,16 +305,24 @@ local function draw_icon(icon, tile_x, tile_y)
 end
 
 local function centered_label_x(tile_x, text)
-    local text_w = math.min(LABEL_BOX_W, #text * LABEL_CHAR_W)
-    return tile_x + TILE_PAD_X + math.floor((LABEL_BOX_W - text_w) / 2)
+    local layout = ui.metrics()
+    local tile_w = math.floor(layout.screen_width / GRID_COLS)
+    local tile_pad_x = layout.font == "tiny" and 1 or 2
+    local label_box_w = tile_w - (tile_pad_x * 2)
+    local text_w = math.min(label_box_w, gfx.textWidth(text))
+    return tile_x + tile_pad_x + math.floor((label_box_w - text_w) / 2)
 end
 
 local function draw_notice(message)
-    gfx.fillRect(10, 24, 108, 14)
+    local layout = ui.metrics()
+    local box_h = layout.box_height + 8
+    local box_y = layout.content_top + math.floor((layout.content_height - box_h) / 2)
+    gfx.fillRect(10, box_y, 108, box_h)
     gfx.setColor(0)
-    gfx.text(14, 33, truncate(message, 19))
+    gfx.setFont(layout.font)
+    gfx.text(14, box_y + 4 + layout.baseline_offset, truncate_to_width(message, 100))
     gfx.setColor(1)
-    gfx.rect(10, 24, 108, 14)
+    gfx.rect(10, box_y, 108, box_h)
 end
 
 local function traceback_message(err)
@@ -330,35 +352,37 @@ local function wrap_text_lines(text, width)
 end
 
 local function draw_crash_popup(title, lines, scroll)
+    local layout = ui.metrics()
     gfx.setColor(0)
     gfx.fillRect(0, 0, 128, 64)
     gfx.setColor(1)
 
-    local end_index = math.min(#lines, scroll + CRASH_VISIBLE_LINES - 1)
+    local wrap_width = char_capacity_for_width(layout.screen_width - 8)
+    local visible_lines = math.max(1, math.floor(layout.content_height / layout.line_height))
+    local end_index = math.min(#lines, scroll + visible_lines - 1)
     local right_text = nil
-    if #lines > CRASH_VISIBLE_LINES then
+    if #lines > visible_lines then
         right_text = string.format("%d/%d", end_index, #lines)
     end
 
-    ui.header(truncate(title, 16), right_text)
-    gfx.setFont(FONT_SMALL)
-    gfx.setFont(FONT_TINY)
+    ui.header(truncate_to_width(title, 86), right_text)
+    gfx.setFont(layout.font)
 
-    for row = 0, CRASH_VISIBLE_LINES - 1 do
+    for row = 0, visible_lines - 1 do
         local index = scroll + row
         if index > #lines then
             break
         end
-        gfx.text(2, CRASH_BODY_BASELINE_Y + row * CRASH_LINE_HEIGHT, truncate(lines[index], CRASH_WRAP_WIDTH))
+        gfx.text(2, layout.content_baseline_start + row * layout.line_height, truncate(lines[index], wrap_width))
     end
 
     ui.footerCentered("UP/DN scroll BKSP close")
 
-    if #lines > CRASH_VISIBLE_LINES then
-        local bar_y = 14
-        local bar_h = 34
-        local thumb_h = math.max(6, math.floor(bar_h * CRASH_VISIBLE_LINES / #lines))
-        local max_scroll = #lines - CRASH_VISIBLE_LINES
+    if #lines > visible_lines then
+        local bar_y = layout.content_top
+        local bar_h = layout.content_height
+        local thumb_h = math.max(6, math.floor(bar_h * visible_lines / #lines))
+        local max_scroll = #lines - visible_lines
         local thumb_y = bar_y
         if max_scroll > 0 then
             thumb_y = bar_y + math.floor((bar_h - thumb_h) * ((scroll - 1) / max_scroll))
@@ -368,7 +392,7 @@ local function draw_crash_popup(title, lines, scroll)
     end
 
     gfx.setColor(1)
-    gfx.setFont(FONT_SMALL)
+    gfx.setFont()
 end
 
 local function draw_scrollbar(total, visible, first_index, top_y, height)
@@ -391,6 +415,9 @@ local function draw_file_list(entries, selected, scroll, top_y, visible_rows, li
         return
     end
 
+    local layout = ui.metrics()
+    gfx.setFont(layout.font)
+
     for row = 0, visible_rows - 1 do
         local index = scroll + row
         if index > #entries then
@@ -402,18 +429,18 @@ local function draw_file_list(entries, selected, scroll, top_y, visible_rows, li
         local marker = entry.is_parent and "<" or (entry.is_dir and "/" or "-")
 
         if index == selected then
-            gfx.fillRect(0, baseline - 7, 123, line_height)
+            gfx.fillRect(0, baseline - layout.glyph_top_offset, 123, layout.box_height)
             gfx.setColor(0)
         else
             gfx.setColor(1)
         end
 
         gfx.text(1, baseline, marker)
-        gfx.text(8, baseline, truncate(entry.name, label_width))
+        gfx.text(8, baseline, truncate_to_width(entry.name, label_width))
         gfx.setColor(1)
     end
 
-    draw_scrollbar(#entries, visible_rows, scroll, top_y - 7, visible_rows * line_height)
+    draw_scrollbar(#entries, visible_rows, scroll, top_y - layout.glyph_top_offset, visible_rows * line_height)
 end
 
 local function draw_two_column_list(entries, selected, scroll, top_y, visible_rows, line_height, left_width, right_x, right_width, right_renderer)
@@ -422,6 +449,8 @@ local function draw_two_column_list(entries, selected, scroll, top_y, visible_ro
         return
     end
 
+    local layout = ui.metrics()
+
     for row = 0, visible_rows - 1 do
         local index = scroll + row
         if index > #entries then
@@ -433,22 +462,22 @@ local function draw_two_column_list(entries, selected, scroll, top_y, visible_ro
         local marker = entry.is_parent and "<" or (entry.is_dir and "/" or "-")
 
         if index == selected then
-            gfx.fillRect(0, baseline - 7, 123, line_height)
+            gfx.fillRect(0, baseline - layout.glyph_top_offset, 123, layout.box_height)
             gfx.setColor(0)
         else
             gfx.setColor(1)
         end
 
-        gfx.setFont(FONT_SMALL)
+        gfx.setFont(layout.font)
         gfx.text(1, baseline, marker)
-        gfx.text(8, baseline, truncate(entry.name, left_width))
-        gfx.setFont(FONT_TINY)
-        gfx.text(right_x, baseline, truncate(right_renderer(entry), right_width))
-        gfx.setFont(FONT_SMALL)
+        gfx.text(8, baseline, truncate_to_width(entry.name, left_width))
+        gfx.setFont(layout.secondary_font)
+        gfx.text(right_x, baseline, truncate_to_width(right_renderer(entry), right_width))
+        gfx.setFont(layout.font)
         gfx.setColor(1)
     end
 
-    draw_scrollbar(#entries, visible_rows, scroll, top_y - 7, visible_rows * line_height)
+    draw_scrollbar(#entries, visible_rows, scroll, top_y - layout.glyph_top_offset, visible_rows * line_height)
 end
 
 local host = {
@@ -524,7 +553,7 @@ end
 function host:show_crash_popup(title, message)
     self.crash_popup_active = true
     self.crash_title = title or "App crash"
-    self.crash_lines = wrap_text_lines(message, CRASH_WRAP_WIDTH)
+    self.crash_lines = wrap_text_lines(message, char_capacity_for_width(ui.metrics().screen_width - 8))
     self.crash_scroll = 1
     self:block_input_until_release()
     self:block_modal_keys_until_release()
@@ -745,7 +774,7 @@ function host:close_current_app()
 end
 
 function host:handle_crash_popup_input(key)
-    local visible_lines = 6
+    local visible_lines = math.max(1, ui.metrics().visible_rows)
     local max_scroll = math.max(1, #self.crash_lines - visible_lines + 1)
 
     if key == input.KEY_UP or key == input.KEY_LEFT then
@@ -761,25 +790,33 @@ function host:handle_crash_popup_input(key)
 end
 
 local function draw_desktop_tile(descriptor, x, y, selected)
-    local label = selected and marquee_text(descriptor.name, LABEL_CHAR_CAP, host.marquee_tick)
-        or truncate(descriptor.name, LABEL_CHAR_CAP)
+    local layout = ui.metrics()
+    local tile_w = math.floor(layout.screen_width / GRID_COLS)
+    local tile_h = math.floor(layout.content_height / GRID_ROWS)
+    local tile_pad_x = layout.font == "tiny" and 1 or 2
+    local label_box_w = tile_w - (tile_pad_x * 2)
+    local label_box_y = y + tile_h - layout.box_height
+    local label_char_cap = char_capacity_for_width(label_box_w)
+    local label_baseline_y = label_box_y + layout.baseline_offset
+    local label = selected and marquee_text(descriptor.name, label_char_cap, host.marquee_tick)
+        or truncate(descriptor.name, label_char_cap)
     local label_x = centered_label_x(x, label)
 
     if selected then
-        gfx.fillRect(x + TILE_PAD_X, y + LABEL_BOX_Y, LABEL_BOX_W, 6)
-        gfx.setColor(1)
-        draw_icon(descriptor.icon, x, y)
+        gfx.fillRect(x + 1, y, tile_w - 2, tile_h)
         gfx.setColor(0)
-        gfx.setFont(FONT_TINY)
-        gfx.text(label_x, y + LABEL_BASELINE_Y, label)
-        gfx.setFont(FONT_SMALL)
+        draw_icon(descriptor.icon, x, y)
+        gfx.fillRect(x + tile_pad_x, label_box_y, label_box_w, layout.box_height)
+        gfx.setColor(1)
     else
+        gfx.rect(x + 1, y, tile_w - 2, tile_h)
         gfx.setColor(1)
         draw_icon(descriptor.icon, x, y)
-        gfx.setFont(FONT_TINY)
-        gfx.text(label_x, y + LABEL_BASELINE_Y, label)
-        gfx.setFont(FONT_SMALL)
     end
+
+    gfx.setFont(layout.font)
+    gfx.text(label_x, label_baseline_y, label)
+    gfx.setFont()
     gfx.setColor(1)
 end
 
@@ -787,10 +824,16 @@ function host:draw_desktop()
     local total = #self.apps
     local selected = self.selected_index
     local right_text = total > 0 and string.format("%d/%d", selected, total) or "0/0"
+    local layout = ui.metrics()
+    local tile_w = math.floor(layout.screen_width / GRID_COLS)
+    local tile_h = math.floor(layout.content_height / GRID_ROWS)
+    local desktop_top = layout.content_top
     ui.header("Desktop", right_text)
 
     if total == 0 then
-        gfx.text(18, 31, "No desktop apps")
+        gfx.setFont(layout.font)
+        gfx.text(18, layout.content_baseline_start + layout.line_height, "No desktop apps")
+        gfx.setFont()
     else
         local page = math.floor((selected - 1) / PAGE_SIZE)
         local first_index = page * PAGE_SIZE + 1
@@ -799,8 +842,8 @@ function host:draw_desktop()
             local slot = index - first_index
             local col = slot % GRID_COLS
             local row = math.floor(slot / GRID_COLS)
-            local x = col * TILE_W
-            local y = DESKTOP_TOP + row * TILE_H
+            local x = col * tile_w
+            local y = desktop_top + row * tile_h
             draw_desktop_tile(self.apps[index], x, y, index == selected)
         end
     end
@@ -851,7 +894,7 @@ end
 
 function host:draw()
     gfx.clear()
-    gfx.setFont(0)
+    gfx.setFont()
 
     if self.active_descriptor then
         if not self:invoke(self.active_descriptor, "draw", self.active_descriptor) then
@@ -1091,7 +1134,7 @@ function file_browser:refresh_current_path(selected_path)
     end
     self:load_path(path)
     self.scroll = previous_scroll
-    self:ensure_visible(4)
+    self:ensure_visible(math.max(1, ui.metrics().visible_rows))
 end
 
 function file_browser:consume_editor_result()
@@ -1216,23 +1259,40 @@ function file_browser:detail_line()
 end
 
 function file_browser:draw_full()
+    local layout = ui.metrics()
+    local visible_rows = math.max(1, layout.visible_rows)
     ui.header("Files", path_tail(self.current_path, 10))
-    self:ensure_visible(4)
-    draw_file_list(self.entries, self.selected, self.scroll, 21, 4, 9, 18)
+    self:ensure_visible(visible_rows)
+    draw_file_list(self.entries, self.selected, self.scroll,
+        layout.content_baseline_start, visible_rows, layout.line_height, layout.screen_width - 16)
     ui.footer("ENT:RO", "A+ENT:RW")
 end
 
 function file_browser:draw_details()
+    local layout = ui.metrics()
+    local visible_rows = math.max(1, layout.visible_rows)
+    local right_width = math.max(26, math.floor(layout.screen_width * 0.28))
+    local right_x = layout.screen_width - right_width - 5
+    local left_width = right_x - 10
     ui.header("Files", path_tail(self.current_path, 10))
-    self:ensure_visible(4)
-    draw_two_column_list(self.entries, self.selected, self.scroll, 21, 4, 9, 7, 46, 16, entry_size_type_text)
+    self:ensure_visible(visible_rows)
+    draw_two_column_list(self.entries, self.selected, self.scroll,
+        layout.content_baseline_start, visible_rows, layout.line_height,
+        left_width, right_x, right_width, entry_size_type_text)
     ui.footer("ENT:RO", "A+ENT:RW")
 end
 
 function file_browser:draw_min()
+    local layout = ui.metrics()
+    local visible_rows = math.max(1, layout.visible_rows)
+    local right_width = math.max(30, math.floor(layout.screen_width * 0.32))
+    local right_x = layout.screen_width - right_width - 5
+    local left_width = right_x - 10
     ui.header("Files", path_tail(self.current_path, 10))
-    self:ensure_visible(4)
-    draw_two_column_list(self.entries, self.selected, self.scroll, 21, 4, 9, 6, 44, 16, entry_modified_text)
+    self:ensure_visible(visible_rows)
+    draw_two_column_list(self.entries, self.selected, self.scroll,
+        layout.content_baseline_start, visible_rows, layout.line_height,
+        left_width, right_x, right_width, entry_modified_text)
     ui.footer("ENT:RO", "A+ENT:RW")
 end
 

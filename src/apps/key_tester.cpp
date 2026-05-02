@@ -49,37 +49,32 @@ void KeyTesterApp::handleInput(char key) {
 
 void KeyTesterApp::render() {
     GUI::drawHeader("KEY TESTER");
-    GUI::setFontSmall();
+    GUI::setFontSystem();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
 
     // Last Key Display
-    u8g2.drawUTF8(0, 24, "LAST:");
+    u8g2.drawUTF8(0, GUI::getContentBaselineStart(), "LAST:");
     if (lastPressedKey != ' ') {
         const char* name = getKeyName(lastPressedKey);
         if (name) {
-            // Special key - show name
-            u8g2.setFont(u8g2_font_ncenB14_tr);
-            u8g2.drawStr(35, 38, name);
+            u8g2.drawStr(35, GUI::getContentBaselineStart() + metrics.lineHeight, name);
         } else {
-            // Regular key (digit) - show large
-            u8g2.setFont(u8g2_font_inr24_t_cyrillic);
             char keyStr[2] = {lastPressedKey, '\0'}; 
-            u8g2.drawUTF8(50, 42, keyStr);
+            u8g2.drawUTF8(50, GUI::getContentBaselineStart() + metrics.lineHeight, keyStr);
         }
     }
     
-    // Currently Held Keys
-    GUI::setFontSmall();
-    u8g2.drawUTF8(0, 55, "HELD:");
+    u8g2.drawUTF8(0, GUI::getFooterBaselineY(), "HELD:");
     int xPos = 28;
     
     for(int i=0; i<activeKeyCount; i++) {
         const char* name = getKeyName(activeKeys[i]);
         if (name) {
-            u8g2.drawStr(xPos, 55, name);
+            u8g2.drawStr(xPos, GUI::getFooterBaselineY(), name);
             xPos += u8g2.getStrWidth(name) + 3;
         } else {
             char buf[4] = {'[', activeKeys[i], ']', '\0'};
-            u8g2.drawStr(xPos, 55, buf);
+            u8g2.drawStr(xPos, GUI::getFooterBaselineY(), buf);
             xPos += 15;
         }
     }

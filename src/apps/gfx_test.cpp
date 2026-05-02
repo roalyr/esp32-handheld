@@ -83,11 +83,11 @@ void GfxTestApp::update() {
         ballX += ballDirX;
         ballY += ballDirY;
         
-        // Bounce off walls (content area: y=12 to y=52 for header/footer)
+        // Bounce off the shared GUI content area
         if (ballX <= 4 || ballX >= GUI::SCREEN_WIDTH - 8) {
             ballDirX = -ballDirX;
         }
-        if (ballY <= GUI::HEADER_HEIGHT + 4 || ballY >= GUI::SCREEN_HEIGHT - GUI::FOOTER_HEIGHT - 8) {
+        if (ballY <= GUI::getContentAreaTop() + 4 || ballY >= GUI::getContentBottom() - 7) {
             ballDirY = -ballDirY;
         }
     }
@@ -101,8 +101,8 @@ void GfxTestApp::render() {
         GUI::drawHeader("CONTRAST", headerInfo);
         
         // Checkerboard pattern in content area
-        int contentTop = GUI::HEADER_HEIGHT + 2;
-        int contentBottom = GUI::SCREEN_HEIGHT - GUI::FOOTER_HEIGHT - 2;
+        int contentTop = GUI::getContentAreaTop() + 2;
+        int contentBottom = GUI::getContentBottom() - 1;
         
         for (int y = contentTop; y < contentBottom; y += 2) {
             for (int x = 0; x < GUI::SCREEN_WIDTH; x += 2) {
@@ -138,8 +138,8 @@ void GfxTestApp::render() {
         u8g2.drawBox(ballX, ballY, 6, 6);
         
         // Draw reference frame to show bounds
-        int contentTop = GUI::HEADER_HEIGHT;
-        int contentHeight = GUI::SCREEN_HEIGHT - GUI::HEADER_HEIGHT - GUI::FOOTER_HEIGHT;
+        int contentTop = GUI::getContentAreaTop();
+        int contentHeight = GUI::getContentHeight();
         u8g2.drawFrame(0, contentTop, GUI::SCREEN_WIDTH, contentHeight);
         
         GUI::drawFooterHints("^v:Spd Enter:Mode", "Esc");

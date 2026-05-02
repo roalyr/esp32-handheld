@@ -42,23 +42,6 @@ const int kT9EditorReadOnlyPageSizeOptionCount = 4;
 const char* kT9EditorFontSizeOptionLabels[] = {"Medium", "Small", "Tiny"};
 const int kT9EditorFontSizeOptionCount = 3;
 static int gT9EditorReadOnlyPageSizeOptionIndex = 2;
-static int gT9EditorFontSizeOptionIndex = 0;
-
-struct T9EditorFontMetrics {
-    const uint8_t* font;
-    int lineHeight;
-    int baselineOffset;
-    int glyphTopOffset;
-    int boxHeight;
-    int cursorHeight;
-    int underlineOffset;
-};
-
-static const T9EditorFontMetrics kT9EditorFontMetrics[] = {
-    {u8g2_font_5x8_tr, 9, 8, 7, 9, 8, 2},
-    {u8g2_font_5x7_tf, 8, 7, 6, 8, 7, 1},
-    {u8g2_font_4x6_tf, 7, 6, 5, 7, 6, 1},
-};
 
 static_assert(sizeof(EditorRecordHeader) < kEditorRecordSize,
               "Editor record header must fit within the fixed record size");
@@ -115,7 +98,7 @@ bool setT9EditorReadOnlyPageSizeOptionIndex(int index) {
 }
 
 int getT9EditorFontSizeOptionIndex() {
-    return gT9EditorFontSizeOptionIndex;
+    return GUI::getSystemFontOptionIndex();
 }
 
 const char* getT9EditorFontSizeOptionLabel(int index) {
@@ -126,19 +109,11 @@ const char* getT9EditorFontSizeOptionLabel(int index) {
 }
 
 bool setT9EditorFontSizeOptionIndex(int index) {
-    if (index < 0 || index >= kT9EditorFontSizeOptionCount) {
-        return false;
-    }
-    gT9EditorFontSizeOptionIndex = index;
-    return true;
+    return GUI::setSystemFontOptionIndex(index);
 }
 
-static const T9EditorFontMetrics& getCurrentFontMetrics() {
-    int index = gT9EditorFontSizeOptionIndex;
-    if (index < 0 || index >= kT9EditorFontSizeOptionCount) {
-        index = 0;
-    }
-    return kT9EditorFontMetrics[index];
+static const GUI::FontMetrics& getCurrentFontMetrics() {
+    return GUI::getSystemFontMetrics();
 }
 
 static uint32_t fnv1a32(const String& text) {
@@ -520,14 +495,19 @@ static void insertCharWithAutoBracket(String& text, int& cursor, char c) {
 static void drawCenteredStatusDialog(const char* message) {
     u8g2.clearBuffer();
     GUI::drawPopupFrame(18, 22, 92, 20, true);
-    u8g2.setFont(u8g2_font_5x8_tr);
-    int msgWidth = u8g2.getStrWidth(message);
-    u8g2.drawStr((GUI::SCREEN_WIDTH - msgWidth) / 2, 35, message);
+    GUI::setFontSystem();
+    String text = GUI::truncateStringToWidth(String(message ? message : ""), 84);
+    int msgWidth = u8g2.getUTF8Width(text.c_str());
+    u8g2.drawUTF8((GUI::SCREEN_WIDTH - msgWidth) / 2, 35, text.c_str());
     u8g2.sendBuffer();
 }
 
 static void drawHighlightedChoiceBar(int xStart, int baselineY, const char* choices, int selectedIndex) {
     if (!choices) return;
+
+    GUI::setFontSystem();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
+    const int availableWidth = GUI::SCREEN_WIDTH - xStart - 5;
 
     int count = strlen(choices);
     if (count <= 0) return;
@@ -544,7 +524,7 @@ static void drawHighlightedChoiceBar(int xStart, int baselineY, const char* choi
     int startIndex = 0;
     int widthToSelected = 0;
     for (int i = 0; i < selectedIndex && i < safeCount; i++) widthToSelected += widths[i];
-    while (widthToSelected > 56 && startIndex < selectedIndex) {
+    while (widthToSelected > (availableWidth / 2) && startIndex < selectedIndex) {
         widthToSelected -= widths[startIndex];
         startIndex++;
     }
@@ -560,13 +540,13 @@ static void drawHighlightedChoiceBar(int xStart, int baselineY, const char* choi
         char item[2] = {choices[i], '\0'};
         int charWidth = u8g2.getStrWidth(item);
         int paddedWidth = charWidth + 2;
-        if (x + paddedWidth > 122) {
+        if (x + paddedWidth > GUI::SCREEN_WIDTH - 5) {
             clippedRight = (i < safeCount);
             break;
         }
 
         if (i == selectedIndex) {
-            u8g2.drawBox(x - 1, baselineY - 7, paddedWidth + 1, 9);
+            u8g2.drawBox(x - 1, GUI::getHighlightTop(baselineY), paddedWidth + 1, GUI::getHighlightHeight());
             u8g2.setDrawColor(0);
             u8g2.drawStr(x, baselineY, item);
             u8g2.setDrawColor(1);
@@ -577,7 +557,7 @@ static void drawHighlightedChoiceBar(int xStart, int baselineY, const char* choi
     }
 
     if (clippedRight) {
-        u8g2.drawStr(123, baselineY, ">");
+        u8g2.drawStr(GUI::SCREEN_WIDTH - 5, baselineY, ">");
     }
 }
 
@@ -1763,7 +1743,7 @@ bool T9EditorApp::showLineNumbers() const {
 int T9EditorApp::getVisibleLineCount() const {
     int textTop = showHeader() ? 13 : 1;
     int textBottom = showFooter() ? 53 : 63;
-    const T9EditorFontMetrics& metrics = getCurrentFontMetrics();
+    const GUI::FontMetrics& metrics = getCurrentFontMetrics();
     int visible = (textBottom - textTop + 1) / metrics.lineHeight;
     return max(1, visible);
 }
@@ -2581,10 +2561,12 @@ void T9EditorApp::renderHeader() {
 void T9EditorApp::renderFooter() const {
     if (!showFooter()) return;
 
-    u8g2.drawHLine(0, 54, 128);
-    u8g2.setFont(u8g2_font_5x8_tr);
+    const int footerBaselineY = GUI::getFooterBaselineY();
+    u8g2.drawHLine(0, GUI::getFooterSeparatorY(), GUI::SCREEN_WIDTH);
+    GUI::setFontSystem();
     if (isReadOnly()) {
-        u8g2.drawStr(1, 62, "RO U/D:scroll L/R:pg");
+        String text = GUI::truncateStringToWidth(String("RO U/D:scroll L/R:pg"), GUI::SCREEN_WIDTH - 2);
+        u8g2.drawUTF8(1, footerBaselineY, text.c_str());
         return;
     }
 
@@ -2592,9 +2574,10 @@ void T9EditorApp::renderFooter() const {
         const char* map = multiTapMap[tapKey - '0'];
         char bar[32];
         snprintf(bar, sizeof(bar), "?[%s] %d/%d", map, tapIndex + 1, (int)strlen(map));
-        u8g2.drawStr(1, 62, bar);
+        String text = GUI::truncateStringToWidth(String(bar), GUI::SCREEN_WIDTH - 2);
+        u8g2.drawUTF8(1, footerBaselineY, text.c_str());
     } else if (fallback) {
-        u8g2.drawStr(1, 62, "?ABC 0:sp exits");
+        u8g2.drawStr(1, footerBaselineY, "?ABC 0:sp exits");
     } else if (inputMode == MODE_T9 && t9predict.hasInput()) {
         char bar[40];
         int dc = t9predict.getDigitCount();
@@ -2626,25 +2609,28 @@ void T9EditorApp::renderFooter() const {
                 snprintf(bar, sizeof(bar), "? [%s]", t9predict.getDigits());
             }
         }
-        u8g2.drawStr(1, 62, bar);
+        String text = GUI::truncateStringToWidth(String(bar), GUI::SCREEN_WIDTH - 2);
+        u8g2.drawUTF8(1, footerBaselineY, text.c_str());
     } else if (inputMode == MODE_T9 && tapKey == '1') {
-        drawHighlightedChoiceBar(1, 62, multiTapMap[1], tapIndex);
+        drawHighlightedChoiceBar(1, footerBaselineY, multiTapMap[1], tapIndex);
     } else if (inputMode == MODE_ABC && tapKey != '\0') {
         const char* map = multiTapMap[tapKey - '0'];
         char bar[32];
         snprintf(bar, sizeof(bar), "[%s] %d/%d", map, tapIndex + 1, (int)strlen(map));
-        u8g2.drawStr(1, 62, bar);
+        String text = GUI::truncateStringToWidth(String(bar), GUI::SCREEN_WIDTH - 2);
+        u8g2.drawUTF8(1, footerBaselineY, text.c_str());
     } else {
         const char* hint = (inputMode == MODE_T9)  ? "A+TAB:ABC SH*:SEL" :
                            (inputMode == MODE_ABC) ? "A+TAB:123 SH*:SEL" :
                                                      "A+TAB:T9 SH*:SEL";
-        u8g2.drawStr(1, 62, hint);
+        String text = GUI::truncateStringToWidth(String(hint), GUI::SCREEN_WIDTH - 2);
+        u8g2.drawUTF8(1, footerBaselineY, text.c_str());
     }
 
     if (selectionMode) {
         const char* tag = "SEL";
         int tagWidth = u8g2.getStrWidth(tag);
-        u8g2.drawStr(GUI::SCREEN_WIDTH - tagWidth - 1, 62, tag);
+        u8g2.drawStr(GUI::SCREEN_WIDTH - tagWidth - 1, footerBaselineY, tag);
     }
 }
 
@@ -2654,26 +2640,8 @@ void T9EditorApp::renderSavePrompt() {
 }
 
 void T9EditorApp::renderPagePrompt() {
-    GUI::drawPopupFrame(6, 10, 116, 44, true);
-    u8g2.setFont(u8g2_font_5x8_tr);
-
-    const char* message = "Dirty page";
-    int msgWidth = u8g2.getStrWidth(message);
-    u8g2.drawStr((GUI::SCREEN_WIDTH - msgWidth) / 2, 24, message);
-
     const char* labels[3] = {"Save", "Discard", "Cancel"};
-    const int buttonY = 41;
-    const int buttonWidth = 30;
-    const int buttonXs[3] = {10, 48, 86};
-    for (int i = 0; i < 3; i++) {
-        if (pagePromptSelection == i) {
-            u8g2.drawBox(buttonXs[i], buttonY - 8, buttonWidth, 10);
-            u8g2.setDrawColor(0);
-        }
-        int textWidth = u8g2.getStrWidth(labels[i]);
-        u8g2.drawStr(buttonXs[i] + (buttonWidth - textWidth) / 2, buttonY, labels[i]);
-        u8g2.setDrawColor(1);
-    }
+    GUI::drawThreeOptionDialog("Dirty page", labels, pagePromptSelection);
 }
 
 void T9EditorApp::render() {
@@ -2687,7 +2655,7 @@ void T9EditorApp::render() {
     int textTop = showHeader() ? 13 : 1;
     int textBottom = showFooter() ? 53 : 63;
     int visibleLines = getVisibleLineCount();
-    const T9EditorFontMetrics& metrics = getCurrentFontMetrics();
+    const GUI::FontMetrics& metrics = getCurrentFontMetrics();
 
     u8g2.setFont(metrics.font);
 

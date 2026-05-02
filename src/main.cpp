@@ -110,22 +110,19 @@ bool isAsleep = false;
 
 void showBootSplash() {
     u8g2.clearBuffer();
+    GUI::setFontSystem();
     
-    // Title
-    u8g2.setFont(u8g2_font_ncenB10_tr);
     const char* title = FIRMWARE_NAME;
     int titleWidth = u8g2.getStrWidth(title);
-    u8g2.drawStr((GUI::SCREEN_WIDTH - titleWidth) / 2, 25, title);
+    u8g2.drawStr((GUI::SCREEN_WIDTH - titleWidth) / 2, 22, title);
     
-    // Version
-    u8g2.setFont(u8g2_font_5x7_tf);
+    GUI::setFontSecondary();
     char verStr[32];
     snprintf(verStr, sizeof(verStr), "v%s", FIRMWARE_VERSION);
     int verWidth = u8g2.getStrWidth(verStr);
-    u8g2.drawStr((GUI::SCREEN_WIDTH - verWidth) / 2, 40, verStr);
+    u8g2.drawStr((GUI::SCREEN_WIDTH - verWidth) / 2, 35, verStr);
     
-    // Loading text
-    u8g2.drawStr((GUI::SCREEN_WIDTH - u8g2.getStrWidth("Initializing...")) / 2, 55, "Initializing...");
+    u8g2.drawStr((GUI::SCREEN_WIDTH - u8g2.getStrWidth("Initializing...")) / 2, 48, "Initializing...");
     
     u8g2.sendBuffer();
     delay(1000);  // Show splash for 1 second
@@ -140,7 +137,7 @@ void enterSleep() {
     
     // Draw screensaver frame (stays visible on LCD with backlight off)
     u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_5x7_t_cyrillic);
+    GUI::setFontSecondary();
     const char* line1 = FIRMWARE_NAME;
     char line2[32];
     snprintf(line2, sizeof(line2), "v%s", FIRMWARE_VERSION);
@@ -200,30 +197,31 @@ void renderLuaError() {
     GUI::drawHeader("LUA ERROR");
     
     // Error message (word-wrapped)
-    u8g2.setFont(u8g2_font_5x7_tf);
+    GUI::setFontSystem();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
     const char* msg = luaErrorMsg.c_str();
-    int y = GUI::CONTENT_START_Y;
-    int maxWidth = GUI::SCREEN_WIDTH - 4;
-    int lineH = 8;
+    int y = GUI::getContentBaselineStart();
+    int charWidth = static_cast<int>(u8g2.getStrWidth("W"));
+    if (charWidth < 1) charWidth = 1;
+    int maxChars = max(1, (GUI::SCREEN_WIDTH - 4) / charWidth);
     
-    // Simple line-by-line rendering (truncate long lines)
     int len = strlen(msg);
     int pos = 0;
-    while (pos < len && y < 54) {
-        // Find how many chars fit on this line
+    while (pos < len && y <= GUI::getContentBottom()) {
         char lineBuf[32];
         int lineLen = 0;
         while (pos + lineLen < len && lineLen < 31) {
+            if (lineLen >= maxChars) break;
             if (msg[pos + lineLen] == '\n') { lineLen++; break; }
             lineLen++;
         }
         memcpy(lineBuf, msg + pos, lineLen);
         lineBuf[lineLen] = '\0';
-        // Strip trailing newline for display
         if (lineLen > 0 && lineBuf[lineLen - 1] == '\n') lineBuf[lineLen - 1] = '\0';
-        u8g2.drawStr(2, y, lineBuf);
+        String line = GUI::truncateStringToWidth(String(lineBuf), GUI::SCREEN_WIDTH - 4);
+        u8g2.drawUTF8(2, y, line.c_str());
         pos += lineLen;
-        y += lineH;
+        y += metrics.lineHeight;
     }
     
     // Footer

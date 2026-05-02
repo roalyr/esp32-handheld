@@ -11,9 +11,6 @@ extern "C" {
 #include <lua/lua.h>  // For LUA_VERSION_MAJOR/MINOR
 }
 
-// Number of visible lines in browser
-static constexpr int VISIBLE_LINES = 3;
-
 void LuaRunnerApp::start() {
     mode = BROWSE;
     selectedIndex = 0;
@@ -44,6 +41,9 @@ void LuaRunnerApp::scanForLuaFiles() {
 }
 
 void LuaRunnerApp::drawBrowser() {
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
+    const int visibleLines = GUI::getVisibleListRows();
+
     // Header with Lua version and current/total
     char headerInfo[20];
     if (fileCount > 0) {
@@ -54,39 +54,35 @@ void LuaRunnerApp::drawBrowser() {
     GUI::drawHeader("LUA", headerInfo);
     
     if (fileCount == 0) {
-        GUI::setFontSmall();
-        u8g2.drawStr(10, 35, "No .lua files found");
-        u8g2.drawStr(10, 45, "Upload via SPIFFS");
+        GUI::setFontSystem();
+        u8g2.drawUTF8(10, GUI::getContentBaselineStart() + metrics.lineHeight, "No .lua files found");
+        u8g2.drawUTF8(10, GUI::getContentBaselineStart() + (metrics.lineHeight * 2), "Upload via SPIFFS");
     } else {
-        // Prepare display names (strip leading /)
-        GUI::setFontSmall();
-        for (int i = 0; i < VISIBLE_LINES && (scrollOffset + i) < fileCount; i++) {
+        GUI::setFontSystem();
+        for (int i = 0; i < visibleLines && (scrollOffset + i) < fileCount; i++) {
             int idx = scrollOffset + i;
-            int y = GUI::CONTENT_START_Y + (i * GUI::LINE_HEIGHT);
+            int y = GUI::getContentBaselineStart() + (i * metrics.lineHeight);
             
-            // Highlight selected
             if (idx == selectedIndex) {
-                u8g2.drawBox(0, y - 8, 123, GUI::LINE_HEIGHT);
+                u8g2.drawBox(0, GUI::getHighlightTop(y), 123, GUI::getHighlightHeight());
                 u8g2.setDrawColor(0);
             }
             
-            // Draw filename (strip leading /, truncate)
             String displayName = files[idx];
             if (displayName.startsWith("/")) {
                 displayName = displayName.substring(1);
             }
-            displayName = GUI::truncateString(displayName, 20);
-            u8g2.drawStr(2, y, displayName.c_str());
+            displayName = GUI::truncateStringToWidth(displayName, GUI::SCREEN_WIDTH - GUI::SCROLLBAR_WIDTH - 6);
+            u8g2.drawUTF8(2, y, displayName.c_str());
             
             u8g2.setDrawColor(1);
         }
         
-        // Scrollbar (accounting for header and footer)
-        if (fileCount > VISIBLE_LINES) {
+        if (fileCount > visibleLines) {
             GUI::drawScrollbar(GUI::SCREEN_WIDTH - GUI::SCROLLBAR_WIDTH - 1,
-                              GUI::HEADER_HEIGHT,
-                              GUI::SCREEN_HEIGHT - GUI::HEADER_HEIGHT - GUI::FOOTER_HEIGHT,
-                              fileCount, VISIBLE_LINES, scrollOffset);
+                              GUI::getContentAreaTop(),
+                              GUI::getContentHeight(),
+                              fileCount, visibleLines, scrollOffset);
         }
     }
     
@@ -96,35 +92,37 @@ void LuaRunnerApp::drawBrowser() {
 void LuaRunnerApp::drawRunning() {
     GUI::drawHeader("RUNNING");
     
-    GUI::setFontSmall();
+    GUI::setFontSystem();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
     String name = currentScript;
     if (name.startsWith("/")) name = name.substring(1);
-    name = GUI::truncateString(name, 20);
-    u8g2.drawStr(2, 24, name.c_str());
+    name = GUI::truncateStringToWidth(name, GUI::SCREEN_WIDTH - 4);
+    u8g2.drawUTF8(2, GUI::getContentBaselineStart(), name.c_str());
     
-    u8g2.drawStr(2, 40, "Press ESC to exit");
+    u8g2.drawUTF8(2, GUI::getContentBaselineStart() + (metrics.lineHeight * 2), "Press ESC to exit");
     
-    // Memory usage
     char memStr[32];
     snprintf(memStr, sizeof(memStr), "Mem: %d KB", (int)(LuaVM::getMemoryUsage() / 1024));
-    u8g2.drawStr(2, 55, memStr);
+    u8g2.drawUTF8(2, GUI::getFooterBaselineY(), memStr);
 }
 
 void LuaRunnerApp::drawError() {
     GUI::drawHeader("LUA ERROR");
     
-    GUI::setFontSmall();
+    GUI::setFontSystem();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
     
-    // Word-wrap error message
-    int y = 24;
+    int y = GUI::getContentBaselineStart();
     int lineStart = 0;
-    int maxChars = 25;
+    int charWidth = static_cast<int>(u8g2.getStrWidth("W"));
+    if (charWidth < 1) charWidth = 1;
+    int maxChars = max(1, (GUI::SCREEN_WIDTH - 4) / charWidth);
     
-    for (int i = 0; i <= (int)errorMessage.length() && y < 52; i++) {
+    for (int i = 0; i <= (int)errorMessage.length() && y <= GUI::getContentBottom(); i++) {
         if (i == (int)errorMessage.length() || (i - lineStart) >= maxChars) {
-            String line = errorMessage.substring(lineStart, i);
-            u8g2.drawStr(2, y, line.c_str());
-            y += 8;
+            String line = GUI::truncateStringToWidth(errorMessage.substring(lineStart, i), GUI::SCREEN_WIDTH - 4);
+            u8g2.drawUTF8(2, y, line.c_str());
+            y += metrics.lineHeight;
             lineStart = i;
         }
     }

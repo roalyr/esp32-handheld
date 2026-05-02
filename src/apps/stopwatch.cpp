@@ -54,6 +54,8 @@ void StopwatchApp::handleInput(char key) {
 
 void StopwatchApp::render() {
     GUI::drawHeader("STOPWATCH");
+    GUI::setFontSystem();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
     
     // Calculate Time Components
     unsigned long totalMillis = getTotalTime();
@@ -67,10 +69,8 @@ void StopwatchApp::render() {
     char buf[16];
     sprintf(buf, "%02lu:%02lu:%02lu", hours, minutes, seconds);
     
-    // Draw Large Time (centered)
-    u8g2.setFont(u8g2_font_ncenB14_tr); 
     int width = u8g2.getStrWidth(buf);
-    u8g2.drawStr((GUI::SCREEN_WIDTH - width) / 2, 40, buf); 
+    u8g2.drawStr((GUI::SCREEN_WIDTH - width) / 2, GUI::getContentBaselineStart() + metrics.lineHeight, buf); 
     
     // Draw Controls
     if (isRunning) {

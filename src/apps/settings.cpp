@@ -235,6 +235,10 @@ static void insertCharWithAutoBracket(String& text, int& cursor, char c) {
 static void drawHighlightedChoiceBar(int xStart, int baselineY, const char* choices, int selectedIndex) {
     if (!choices) return;
 
+    GUI::setFontSystem();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
+    const int availableWidth = GUI::SCREEN_WIDTH - xStart - 5;
+
     int count = strlen(choices);
     if (count <= 0) return;
     if (selectedIndex < 0) selectedIndex = 0;
@@ -250,7 +254,7 @@ static void drawHighlightedChoiceBar(int xStart, int baselineY, const char* choi
     int startIndex = 0;
     int widthToSelected = 0;
     for (int i = 0; i < selectedIndex && i < safeCount; i++) widthToSelected += widths[i];
-    while (widthToSelected > 56 && startIndex < selectedIndex) {
+    while (widthToSelected > (availableWidth / 2) && startIndex < selectedIndex) {
         widthToSelected -= widths[startIndex];
         startIndex++;
     }
@@ -266,13 +270,13 @@ static void drawHighlightedChoiceBar(int xStart, int baselineY, const char* choi
         char item[2] = {choices[i], '\0'};
         int charWidth = u8g2.getStrWidth(item);
         int paddedWidth = charWidth + 2;
-        if (x + paddedWidth > 122) {
+        if (x + paddedWidth > GUI::SCREEN_WIDTH - 5) {
             clippedRight = (i < safeCount);
             break;
         }
 
         if (i == selectedIndex) {
-            u8g2.drawBox(x - 1, baselineY - 7, paddedWidth + 1, 9);
+            u8g2.drawBox(x - 1, GUI::getHighlightTop(baselineY), paddedWidth + 1, GUI::getHighlightHeight());
             u8g2.setDrawColor(0);
             u8g2.drawStr(x, baselineY, item);
             u8g2.setDrawColor(1);
@@ -283,7 +287,7 @@ static void drawHighlightedChoiceBar(int xStart, int baselineY, const char* choi
     }
 
     if (clippedRight) {
-        u8g2.drawStr(123, baselineY, ">");
+        u8g2.drawStr(GUI::SCREEN_WIDTH - 5, baselineY, ">");
     }
 }
 
@@ -295,7 +299,7 @@ SettingsApp::SettingsApp() {
     tempBrightness = systemBrightness;
     tempContrast = systemContrast;
     tempSleepEnabled = SLEEP_ENABLED;
-    tempT9FontSizeIndex = getT9EditorFontSizeOptionIndex();
+    tempT9FontSizeIndex = GUI::getSystemFontOptionIndex();
     tempReadOnlyPageSizeIndex = getT9EditorReadOnlyPageSizeOptionIndex();
     lastPressedKey = ' ';
     for (int i = 0; i < HISTORY_SIZE; i++) keyHistory[i] = ' ';
@@ -319,7 +323,7 @@ void SettingsApp::start() {
     tempBrightness = systemBrightness;
     tempContrast = systemContrast;
     tempSleepEnabled = sleepEnabled;
-    tempT9FontSizeIndex = getT9EditorFontSizeOptionIndex();
+    tempT9FontSizeIndex = GUI::getSystemFontOptionIndex();
     tempReadOnlyPageSizeIndex = getT9EditorReadOnlyPageSizeOptionIndex();
     editMode = false;
     inKeyTester = false;
@@ -337,7 +341,7 @@ void SettingsApp::stop() {
     systemBrightness = tempBrightness;
     systemContrast = tempContrast;
     sleepEnabled = tempSleepEnabled;
-    setT9EditorFontSizeOptionIndex(tempT9FontSizeIndex);
+    GUI::setSystemFontOptionIndex(tempT9FontSizeIndex);
     setT9EditorReadOnlyPageSizeOptionIndex(tempReadOnlyPageSizeIndex);
     inKeyTester = false;
     inT9Editor = false;
@@ -497,7 +501,7 @@ void SettingsApp::handleInput(char key) {
         if (key == KEY_ENTER) {
             editMode = false;
             if (selectedIndex == SETTING_T9_FONT_SIZE) {
-                setT9EditorFontSizeOptionIndex(tempT9FontSizeIndex);
+                GUI::setSystemFontOptionIndex(tempT9FontSizeIndex);
             }
             if (selectedIndex == SETTING_BRIGHTNESS) {
                 systemBrightness = tempBrightness;
@@ -527,8 +531,8 @@ void SettingsApp::handleInput(char key) {
                 if (key == KEY_LEFT) nextIndex--;
                 else nextIndex++;
 
-                if (nextIndex < 0) nextIndex = kT9EditorFontSizeOptionCount - 1;
-                if (nextIndex >= kT9EditorFontSizeOptionCount) nextIndex = 0;
+                if (nextIndex < 0) nextIndex = GUI::kSystemFontOptionCount - 1;
+                if (nextIndex >= GUI::kSystemFontOptionCount) nextIndex = 0;
 
                 tempT9FontSizeIndex = nextIndex;
             }
@@ -550,9 +554,10 @@ void SettingsApp::handleInput(char key) {
 }
 
 void SettingsApp::renderInfoHeader() {
+    const GUI::FontMetrics& infoMetrics = GUI::getSecondaryFontMetrics();
     u8g2.drawBox(0, 0, GUI::SCREEN_WIDTH, GUI::SCREEN_HEIGHT);
     u8g2.setDrawColor(0);
-    u8g2.setFont(GUI::FONT_TINY);
+    GUI::setFontSecondary();
 
     const uint32_t totalHeapK = ESP.getHeapSize() / 1024;
     const uint32_t freeHeapK = ESP.getFreeHeap() / 1024;
@@ -579,7 +584,11 @@ void SettingsApp::renderInfoHeader() {
              static_cast<unsigned long>(totalHeapK));
     snprintf(heapRight, sizeof(heapRight), "INT %luk",
              static_cast<unsigned long>(kSettingsPhysicalRamK));
-    drawInfoRow(6, heapLeft, heapRight);
+    const int row1Y = infoMetrics.baselineOffset;
+    const int row2Y = row1Y + infoMetrics.lineHeight;
+    const int row3Y = row2Y + infoMetrics.lineHeight;
+
+    drawInfoRow(row1Y, heapLeft, heapRight);
 
     char psramLeft[28];
     if (totalPsramK > 0) {
@@ -589,7 +598,7 @@ void SettingsApp::renderInfoHeader() {
     } else {
         snprintf(psramLeft, sizeof(psramLeft), "PSRAM none");
     }
-    drawInfoRow(13, psramLeft, kSettingsBatteryStub);
+    drawInfoRow(row2Y, psramLeft, kSettingsBatteryStub);
 
     char timeBuf[8];
     SystemClock::getTimeString(timeBuf, sizeof(timeBuf));
@@ -607,18 +616,23 @@ void SettingsApp::renderInfoHeader() {
 
     char statusRight[24];
     snprintf(statusRight, sizeof(statusRight), "v%s %s", FIRMWARE_VERSION, timeBuf);
-    drawInfoRow(20, sdLeft, statusRight);
-    u8g2.drawHLine(0, 24, GUI::SCREEN_WIDTH);
+    drawInfoRow(row3Y, sdLeft, statusRight);
+    u8g2.drawHLine(0, row3Y + 4, GUI::SCREEN_WIDTH);
 }
 
 void SettingsApp::renderSettingsList() {
+    const GUI::FontMetrics& infoMetrics = GUI::getSecondaryFontMetrics();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
+
     renderInfoHeader();
-    u8g2.setFont(u8g2_font_5x8_tr);
+    GUI::setFontSystem();
 
     const int totalItems = SETTING_COUNT;
-    const int maxVisible = 4;
-    const int lineHeight = 8;
-    const int listTop = 31;
+    const int headerBottom = (infoMetrics.lineHeight * 3) + 4;
+    const int listTop = headerBottom + metrics.baselineOffset + 2;
+    const int lineHeight = metrics.lineHeight;
+    int maxVisible = (GUI::SCREEN_HEIGHT - listTop - 1) / lineHeight;
+    if (maxVisible < 1) maxVisible = 1;
 
     int scrollOff = 0;
     if (selectedIndex >= maxVisible) {
@@ -633,7 +647,7 @@ void SettingsApp::renderSettingsList() {
         char buf[40];
 
         if (isSelected) {
-            u8g2.drawBox(0, y - 7, 123, lineHeight);
+            u8g2.drawBox(0, GUI::getHighlightTop(y), 123, GUI::getHighlightHeight());
             u8g2.setDrawColor(1);
         }
 
@@ -643,9 +657,9 @@ void SettingsApp::renderSettingsList() {
             break;
         case SETTING_T9_FONT_SIZE:
             if (editMode && isSelected)
-                snprintf(buf, sizeof(buf), "T9 font: <%s>", getT9EditorFontSizeOptionLabel(tempT9FontSizeIndex));
+                snprintf(buf, sizeof(buf), "System font: <%s>", GUI::getSystemFontOptionLabel(tempT9FontSizeIndex));
             else
-                snprintf(buf, sizeof(buf), "T9 font: %s", getT9EditorFontSizeOptionLabel(tempT9FontSizeIndex));
+                snprintf(buf, sizeof(buf), "System font: %s", GUI::getSystemFontOptionLabel(tempT9FontSizeIndex));
             break;
         case SETTING_BRIGHTNESS: {
             int pct = (tempBrightness * 100) / 255;
@@ -682,14 +696,15 @@ void SettingsApp::renderSettingsList() {
             buf[0] = '\0';
         }
 
-        u8g2.drawStr(2, y, buf);
+        String text = GUI::truncateStringToWidth(String(buf), GUI::SCREEN_WIDTH - GUI::SCROLLBAR_WIDTH - 6);
+        u8g2.drawUTF8(2, y, text.c_str());
         if (isSelected) u8g2.setDrawColor(0);
     }
 
     if (totalItems > maxVisible) {
         GUI::drawScrollbar(
             GUI::SCREEN_WIDTH - GUI::SCROLLBAR_WIDTH - 1,
-            listTop - 7,
+            listTop - metrics.glyphTopOffset,
             maxVisible * lineHeight,
             totalItems,
             maxVisible,
@@ -702,7 +717,13 @@ void SettingsApp::renderSettingsList() {
 
 void SettingsApp::renderKeyTester() {
     GUI::drawHeader("KEY TESTER");
-    GUI::setFontSmall();
+    GUI::setFontSystem();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
+    const int line1 = GUI::getContentBaselineStart();
+    const int line2 = line1 + metrics.lineHeight;
+    const int line3 = line2 + metrics.lineHeight;
+    const int line4 = line3 + metrics.lineHeight;
+    const int line5 = line4 + metrics.lineHeight;
 
     char lastBuf[8] = "-";
     if (lastPressedKey != ' ') {
@@ -718,10 +739,10 @@ void SettingsApp::renderKeyTester() {
 
     char lineBuf[32];
     snprintf(lineBuf, sizeof(lineBuf), "LAST:%s", lastBuf);
-    u8g2.drawStr(0, 16, lineBuf);
+    u8g2.drawStr(0, line1, lineBuf);
 
     snprintf(lineBuf, sizeof(lineBuf), "EVT:%s", keyHistory);
-    u8g2.drawStr(0, 24, lineBuf);
+    u8g2.drawStr(0, line2, lineBuf);
 
     const uint32_t rawDelta = getMatrixRawHitCount() - keyTesterRawHitBaseline;
     const uint32_t latchedDelta = getMatrixLatchedHitCount() - keyTesterLatchedBaseline;
@@ -731,30 +752,30 @@ void SettingsApp::renderKeyTester() {
     snprintf(lineBuf, sizeof(lineBuf), "RAW:%lu LAT:%lu",
              static_cast<unsigned long>(rawDelta),
              static_cast<unsigned long>(latchedDelta));
-    u8g2.drawStr(0, 32, lineBuf);
+    u8g2.drawStr(0, line3, lineBuf);
 
     snprintf(lineBuf, sizeof(lineBuf), "DUP:%lu IN:%lu",
              static_cast<unsigned long>(duplicateDelta),
              static_cast<unsigned long>(keyTesterDeliveredCount));
-    u8g2.drawStr(0, 40, lineBuf);
+    u8g2.drawStr(0, line4, lineBuf);
 
     snprintf(lineBuf, sizeof(lineBuf), "SET:%uus P:%lu",
              static_cast<unsigned>(getMatrixSettleDelayUs()),
              static_cast<unsigned long>(pollDelta));
-    u8g2.drawStr(0, 48, lineBuf);
+    u8g2.drawStr(0, line5, lineBuf);
 
-    u8g2.drawStr(0, 56, "A+L/R:set A+E:rst");
+    u8g2.drawStr(0, GUI::getFooterBaselineY() - metrics.lineHeight, "A+L/R:set A+E:rst");
 
     int xPos = 28;
-    u8g2.drawUTF8(0, 63, "HLD:");
+    u8g2.drawUTF8(0, GUI::getFooterBaselineY(), "HLD:");
     for (int i = 0; i < activeKeyCount; i++) {
         const char* name = getKeyName(activeKeys[i]);
         if (name) {
-            u8g2.drawStr(xPos, 63, name);
+            u8g2.drawStr(xPos, GUI::getFooterBaselineY(), name);
             xPos += u8g2.getStrWidth(name) + 3;
         } else {
             char buf[4] = {'[', activeKeys[i], ']', '\0'};
-            u8g2.drawStr(xPos, 63, buf);
+            u8g2.drawStr(xPos, GUI::getFooterBaselineY(), buf);
             xPos += 15;
         }
     }
@@ -798,7 +819,7 @@ void SettingsApp::renderLcdTest() {
         // All pixels ON (full fill)
         u8g2.drawBox(0, 0, 128, 64);
         u8g2.setDrawColor(0);
-        u8g2.setFont(u8g2_font_5x7_tf);
+        GUI::setFontSystem();
         u8g2.drawStr(2, 8, "ALL PIXELS ON");
         u8g2.drawStr(108, 8, stepBuf);
         u8g2.drawStr(36, 63, "Enter:Next");
@@ -815,7 +836,7 @@ void SettingsApp::renderLcdTest() {
         u8g2.drawBox(0, 0, 128, 9);
         u8g2.drawBox(0, 56, 128, 8);
         u8g2.setDrawColor(1);
-        u8g2.setFont(u8g2_font_5x7_tf);
+        GUI::setFontSystem();
         u8g2.drawBox(0, 0, 128, 9);
         u8g2.setDrawColor(0);
         u8g2.drawStr(2, 8, "ALL HLINES");
@@ -830,7 +851,7 @@ void SettingsApp::renderLcdTest() {
         for (int y = 0; y < 64; y += 2) {
             u8g2.drawHLine(0, y, 128);
         }
-        u8g2.setFont(u8g2_font_5x7_tf);
+        GUI::setFontSystem();
         u8g2.drawBox(0, 0, 128, 9);
         u8g2.setDrawColor(0);
         u8g2.drawStr(2, 8, "EVEN ROWS");
@@ -845,7 +866,7 @@ void SettingsApp::renderLcdTest() {
         for (int y = 1; y < 64; y += 2) {
             u8g2.drawHLine(0, y, 128);
         }
-        u8g2.setFont(u8g2_font_5x7_tf);
+        GUI::setFontSystem();
         u8g2.drawBox(0, 0, 128, 9);
         u8g2.setDrawColor(0);
         u8g2.drawStr(2, 8, "ODD ROWS");
@@ -857,7 +878,7 @@ void SettingsApp::renderLcdTest() {
 
     case 4: {
         // 8-pixel bands with row numbers
-        u8g2.setFont(u8g2_font_4x6_tf);
+        GUI::setFontSecondary();
         for (int band = 0; band < 8; band++) {
             int y0 = band * 8;
             if (band % 2 == 0) {
@@ -890,7 +911,7 @@ void SettingsApp::renderLcdTest() {
         // 8px grid
         for (int y = 0; y < 64; y += 8) u8g2.drawHLine(0, y, 128);
         for (int x = 0; x < 128; x += 8) u8g2.drawVLine(x, 0, 64);
-        u8g2.setFont(u8g2_font_5x7_tf);
+        GUI::setFontSystem();
         u8g2.drawBox(0, 0, 128, 9);
         u8g2.setDrawColor(0);
         u8g2.drawStr(2, 8, "8px GRID");
@@ -1138,16 +1159,17 @@ void SettingsApp::renderSdTest() {
     }
 
     GUI::drawHeader("SD PIN TEST");
-    u8g2.setFont(u8g2_font_4x6_tf);
+    GUI::setFontSecondary();
+    const GUI::FontMetrics& metrics = GUI::getSecondaryFontMetrics();
 
-    int y = GUI::HEADER_HEIGHT + 8;
-    for (int i = 0; i < sdTestLineCount && y < 58; i++) {
+    int y = GUI::getContentAreaTop() + metrics.baselineOffset;
+    for (int i = 0; i < sdTestLineCount && y <= GUI::getContentBottom() - metrics.lineHeight; i++) {
         u8g2.drawStr(1, y, sdTestResults[i]);
-        y += 7;
+        y += metrics.lineHeight;
     }
 
-    u8g2.setFont(u8g2_font_5x7_tf);
-    u8g2.drawStr(1, 63, "Esc:Back  >:Retest");
+    GUI::setFontSystem();
+    u8g2.drawStr(1, GUI::getFooterBaselineY(), "Esc:Back  >:Retest");
 }
 
 // --------------------------------------------------------------------------
@@ -1592,6 +1614,7 @@ void SettingsApp::renderT9Editor() {
     const bool showHeader = (t9ViewMode == VIEW_FULL || t9ViewMode == VIEW_FULL_LINENO);
     const bool showFooter = (t9ViewMode == VIEW_FULL || t9ViewMode == VIEW_FULL_LINENO);
     const bool showLineNumbers = (t9ViewMode == VIEW_FULL_LINENO || t9ViewMode == VIEW_MIN_LINENO);
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
 
     const char* modeStr = t9Fallback ? "?ABC" :
                           (t9InputMode == MODE_T9) ? "T9" :
@@ -1604,7 +1627,7 @@ void SettingsApp::renderT9Editor() {
         GUI::drawHeader("T9 EDITOR", headerRight);
     }
 
-    GUI::setFontSmall();
+    GUI::setFontSystem();
 
     String displayText = t9Text;
     int previewInsertPos = t9Cursor;
@@ -1659,13 +1682,16 @@ void SettingsApp::renderT9Editor() {
         displayText = displayText.substring(0, previewInsertPos) + preview + displayText.substring(previewInsertPos);
     }
 
-    int lineHeight = 9;
-    int textTop = showHeader ? 13 : 1;
-    int textBottom = showFooter ? 53 : 63;
+    int lineHeight = metrics.lineHeight;
+    int textTop = showHeader ? GUI::getContentAreaTop() : 0;
+    int textBottom = showFooter ? GUI::getContentBottom() : (GUI::SCREEN_HEIGHT - 1);
     int maxVisibleLines = (textBottom - textTop + 1) / lineHeight;
     if (maxVisibleLines < 1) maxVisibleLines = 1;
-    int maxCharsPerLine = showLineNumbers ? 18 : 21;
     int textX = showLineNumbers ? 12 : 1;
+    int charWidth = u8g2.getStrWidth("W");
+    if (charWidth < 1) charWidth = 1;
+    int maxCharsPerLine = (GUI::SCREEN_WIDTH - textX - 1) / charWidth;
+    if (maxCharsPerLine < 1) maxCharsPerLine = 1;
     int textLen = displayText.length();
 
     int lineStarts[64];
@@ -1710,7 +1736,7 @@ void SettingsApp::renderT9Editor() {
         u8g2.drawVLine(10, textTop, textBottom - textTop + 1);
     }
 
-    int y = textTop + 9;
+    int y = textTop + metrics.baselineOffset;
     int cursorScreenX = -1, cursorScreenY = -1;
     for (int i = 0; i < maxVisibleLines; i++) {
         int li = t9ScrollOffset + i;
@@ -1737,7 +1763,7 @@ void SettingsApp::renderT9Editor() {
             String fbPart = line.substring(regionS, regionE);
             int xFb = textX + u8g2.getStrWidth(line.substring(0, regionS).c_str());
             int wFb = u8g2.getStrWidth(fbPart.c_str());
-            u8g2.drawBox(xFb, y - 7, wFb, 9);
+            u8g2.drawBox(xFb, GUI::getHighlightTop(y), wFb, GUI::getHighlightHeight());
             u8g2.setDrawColor(0);
             u8g2.drawStr(xFb, y, fbPart.c_str());
             u8g2.setDrawColor(1);
@@ -1766,21 +1792,23 @@ void SettingsApp::renderT9Editor() {
         } else {
             bool recentMove = (millis() - t9CursorMoveTime < CURSOR_BLINK_RATE);
             if (recentMove || (millis() / CURSOR_BLINK_RATE) % 2) {
-                u8g2.drawVLine(cursorScreenX, cursorScreenY - 7, 8);
+                u8g2.drawVLine(cursorScreenX, cursorScreenY - metrics.glyphTopOffset, metrics.cursorHeight);
             }
         }
     }
 
     if (showFooter) {
-        u8g2.drawHLine(0, 54, 128);
-        GUI::setFontSmall();
+        const int footerBaselineY = GUI::getFooterBaselineY();
+        u8g2.drawHLine(0, GUI::getFooterSeparatorY(), GUI::SCREEN_WIDTH);
+        GUI::setFontSystem();
         if (t9Fallback && t9TapKey != '\0') {
             const char* map = multiTapMap[t9TapKey - '0'];
             char bar[32];
             snprintf(bar, sizeof(bar), "?[%s] %d/%d", map, t9TapIndex + 1, (int)strlen(map));
-            u8g2.drawStr(1, 62, bar);
+            String text = GUI::truncateStringToWidth(String(bar), GUI::SCREEN_WIDTH - 2);
+            u8g2.drawUTF8(1, footerBaselineY, text.c_str());
         } else if (t9Fallback) {
-            u8g2.drawStr(1, 62, "?ABC 0:sp exits");
+            u8g2.drawStr(1, footerBaselineY, "?ABC 0:sp exits");
         } else if (t9InputMode == MODE_T9 && t9predict.hasInput()) {
             char bar[40];
             int dc = t9predict.getDigitCount();
@@ -1812,19 +1840,22 @@ void SettingsApp::renderT9Editor() {
                     snprintf(bar, sizeof(bar), "? [%s]", t9predict.getDigits());
                 }
             }
-            u8g2.drawStr(1, 62, bar);
+            String text = GUI::truncateStringToWidth(String(bar), GUI::SCREEN_WIDTH - 2);
+            u8g2.drawUTF8(1, footerBaselineY, text.c_str());
         } else if (t9InputMode == MODE_T9 && t9TapKey == '1') {
-            drawHighlightedChoiceBar(1, 62, multiTapMap[1], t9TapIndex);
+            drawHighlightedChoiceBar(1, footerBaselineY, multiTapMap[1], t9TapIndex);
         } else if (t9InputMode == MODE_ABC && t9TapKey != '\0') {
             const char* map = multiTapMap[t9TapKey - '0'];
             char bar[32];
             snprintf(bar, sizeof(bar), "[%s] %d/%d", map, t9TapIndex + 1, (int)strlen(map));
-            u8g2.drawStr(1, 62, bar);
+            String text = GUI::truncateStringToWidth(String(bar), GUI::SCREEN_WIDTH - 2);
+            u8g2.drawUTF8(1, footerBaselineY, text.c_str());
         } else {
             const char* hint = (t9InputMode == MODE_T9)  ? "ALT:ABC 2-9:T9 0:sp" :
                                (t9InputMode == MODE_ABC) ? "ALT:123 0-9:tap" :
                                                            "ALT:T9 0-9:digits";
-            u8g2.drawStr(1, 62, hint);
+            String text = GUI::truncateStringToWidth(String(hint), GUI::SCREEN_WIDTH - 2);
+            u8g2.drawUTF8(1, footerBaselineY, text.c_str());
         }
     }
 

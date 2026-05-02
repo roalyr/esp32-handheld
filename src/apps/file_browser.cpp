@@ -298,7 +298,7 @@ void FileBrowserApp::handleBrowseInput(char key) {
     }
 
     // List navigation
-    GUI::ScrollState state = {selectedIndex, scrollOffset, (int)fileList.size(), VISIBLE_ITEMS};
+    GUI::ScrollState state = {selectedIndex, scrollOffset, (int)fileList.size(), GUI::getVisibleListRows()};
     if (GUI::handleListNavigation(state, key)) {
         selectedIndex = state.selectedIndex;
         scrollOffset = state.scrollOffset;
@@ -342,32 +342,36 @@ void FileBrowserApp::render() {
 
 void FileBrowserApp::renderLuaRunning() {
     GUI::drawHeader("RUNNING");
-    GUI::setFontSmall();
+    GUI::setFontSystem();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
     
     String name = currentLuaScript;
     if (name.startsWith("/")) name = name.substring(1);
-    name = GUI::truncateString(name, 20);
-    u8g2.drawStr(2, 24, name.c_str());
-    u8g2.drawStr(2, 40, "Press ESC to exit");
+    name = GUI::truncateStringToWidth(name, GUI::SCREEN_WIDTH - 4);
+    u8g2.drawUTF8(2, GUI::getContentBaselineStart(), name.c_str());
+    u8g2.drawUTF8(2, GUI::getContentBaselineStart() + (metrics.lineHeight * 2), "Press ESC to exit");
     
     char memStr[32];
     snprintf(memStr, sizeof(memStr), "Mem: %d KB", (int)(LuaVM::getMemoryUsage() / 1024));
-    u8g2.drawStr(2, 55, memStr);
+    u8g2.drawUTF8(2, GUI::getFooterBaselineY(), memStr);
 }
 
 void FileBrowserApp::renderLuaError() {
     GUI::drawHeader("LUA ERROR");
-    GUI::setFontSmall();
+    GUI::setFontSystem();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
     
-    // Simple word-wrap for error message
-    int y = 24;
+    int y = GUI::getContentBaselineStart();
     int lineStart = 0;
-    const int maxChars = 25;
+    int charWidth = static_cast<int>(u8g2.getStrWidth("W"));
+    if (charWidth < 1) charWidth = 1;
+    const int maxChars = max(1, (GUI::SCREEN_WIDTH - 4) / charWidth);
     
-    for (int i = 0; i <= (int)luaErrorMessage.length() && y < 52; i++) {
+    for (int i = 0; i <= (int)luaErrorMessage.length() && y <= GUI::getContentBottom(); i++) {
         if (i == (int)luaErrorMessage.length() || (i - lineStart) >= maxChars) {
-            u8g2.drawStr(2, y, luaErrorMessage.substring(lineStart, i).c_str());
-            y += 8;
+            String line = GUI::truncateStringToWidth(luaErrorMessage.substring(lineStart, i), GUI::SCREEN_WIDTH - 4);
+            u8g2.drawUTF8(2, y, line.c_str());
+            y += metrics.lineHeight;
             lineStart = i;
         }
     }
@@ -397,32 +401,36 @@ void FileBrowserApp::renderHeader() {
 }
 
 void FileBrowserApp::renderFileList() {
-    GUI::setFontSmall();
+    GUI::setFontSystem();
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
+    const int visibleItems = GUI::getVisibleListRows();
+    const int baselineStart = GUI::getContentBaselineStart();
     
-    for (int i = 0; i < VISIBLE_ITEMS && scrollOffset + i < (int)fileList.size(); i++) {
-        int y = GUI::CONTENT_START_Y + i * GUI::LINE_HEIGHT;
+    for (int i = 0; i < visibleItems && scrollOffset + i < (int)fileList.size(); i++) {
+        int y = baselineStart + i * metrics.lineHeight;
         int listIndex = scrollOffset + i;
         bool isSelected = (listIndex == selectedIndex);
 
         if (isSelected) {
-            u8g2.drawBox(0, y - 8, 123, GUI::LINE_HEIGHT);
+            u8g2.drawBox(0, GUI::getHighlightTop(y), 123, GUI::getHighlightHeight());
             u8g2.setDrawColor(0);
         }
 
-        String displayName = GUI::truncateString(fileList[listIndex].name, MAX_FILENAME_DISPLAY);
-        u8g2.drawStr(2, y, displayName.c_str());
+        String displayName = GUI::truncateStringToWidth(fileList[listIndex].name, GUI::SCREEN_WIDTH - GUI::SCROLLBAR_WIDTH - 6);
+        u8g2.drawUTF8(2, y, displayName.c_str());
 
         if (isSelected) u8g2.setDrawColor(1);
     }
 }
 
 void FileBrowserApp::renderScrollbar() {
-    if ((int)fileList.size() > VISIBLE_ITEMS) {
+    const int visibleItems = GUI::getVisibleListRows();
+    if ((int)fileList.size() > visibleItems) {
         GUI::drawScrollbar(
             GUI::SCREEN_WIDTH - GUI::SCROLLBAR_WIDTH - 1,
-            GUI::HEADER_HEIGHT,
-            GUI::SCREEN_HEIGHT - GUI::HEADER_HEIGHT - GUI::FOOTER_HEIGHT,
-            (int)fileList.size(), VISIBLE_ITEMS, scrollOffset
+            GUI::getContentAreaTop(),
+            GUI::getContentHeight(),
+            (int)fileList.size(), visibleItems, scrollOffset
         );
     }
 }

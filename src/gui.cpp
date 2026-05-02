@@ -13,11 +13,159 @@ namespace GUI {
 // FONT DEFINITIONS
 // ==========================================================================
 
-const uint8_t* FONT_TINY   = u8g2_font_4x6_tf;
-const uint8_t* FONT_SMALL  = u8g2_font_5x7_tf;
-const uint8_t* FONT_MEDIUM = u8g2_font_6x10_tf;
-const uint8_t* FONT_LARGE  = u8g2_font_8x13_tf;
-const uint8_t* FONT_TITLE  = u8g2_font_ncenB12_tr;
+static const FontMetrics kSystemFontMetrics[FONT_SIZE_COUNT] = {
+    {u8g2_font_4x6_tf, 7, 6, 5, 7, 6, 1},
+    {u8g2_font_5x7_tf, 8, 7, 6, 8, 7, 1},
+    {u8g2_font_5x8_tr, 9, 8, 7, 9, 8, 2},
+};
+
+const char* kSystemFontOptionLabels[] = {"Medium", "Small", "Tiny"};
+const int kSystemFontOptionCount = 3;
+static const int kSystemFontOptionToSize[kSystemFontOptionCount] = {
+    FONT_SIZE_MEDIUM,
+    FONT_SIZE_SMALL,
+    FONT_SIZE_TINY,
+};
+static int gSystemFontOptionIndex = 0;
+
+const uint8_t* FONT_TINY   = kSystemFontMetrics[FONT_SIZE_TINY].font;
+const uint8_t* FONT_SMALL  = kSystemFontMetrics[FONT_SIZE_SMALL].font;
+const uint8_t* FONT_MEDIUM = kSystemFontMetrics[FONT_SIZE_MEDIUM].font;
+const uint8_t* FONT_LARGE  = kSystemFontMetrics[FONT_SIZE_MEDIUM].font;
+const uint8_t* FONT_TITLE  = kSystemFontMetrics[FONT_SIZE_MEDIUM].font;
+
+int getSystemFontSize() {
+    int optionIndex = gSystemFontOptionIndex;
+    if (optionIndex < 0 || optionIndex >= kSystemFontOptionCount) {
+        optionIndex = 0;
+    }
+    return kSystemFontOptionToSize[optionIndex];
+}
+
+static int normalizeExplicitFontSize(int fontSize) {
+    if (fontSize < 0 || fontSize >= FONT_SIZE_COUNT) {
+        return FONT_SIZE_SMALL;
+    }
+    return fontSize;
+}
+
+static int resolveFontSize(int fontSize) {
+    if (fontSize < 0) {
+        return getSystemFontSize();
+    }
+    return normalizeExplicitFontSize(fontSize);
+}
+
+const FontMetrics& getFontMetrics(int fontSize) {
+    return kSystemFontMetrics[resolveFontSize(fontSize)];
+}
+
+const FontMetrics& getSystemFontMetrics() {
+    return kSystemFontMetrics[getSystemFontSize()];
+}
+
+int getSystemFontOptionIndex() {
+    return gSystemFontOptionIndex;
+}
+
+const char* getSystemFontOptionLabel(int index) {
+    if (index < 0 || index >= kSystemFontOptionCount) {
+        return kSystemFontOptionLabels[0];
+    }
+    return kSystemFontOptionLabels[index];
+}
+
+bool setSystemFontOptionIndex(int index) {
+    if (index < 0 || index >= kSystemFontOptionCount) {
+        return false;
+    }
+    gSystemFontOptionIndex = index;
+    return true;
+}
+
+int getSecondaryFontSize(int fontSize) {
+    int resolved = resolveFontSize(fontSize);
+    if (resolved == FONT_SIZE_MEDIUM) {
+        return FONT_SIZE_SMALL;
+    }
+    return FONT_SIZE_TINY;
+}
+
+const FontMetrics& getSecondaryFontMetrics() {
+    return getFontMetrics(getSecondaryFontSize());
+}
+
+void setFontBySize(int fontSize) {
+    u8g2.setFont(getFontMetrics(fontSize).font);
+}
+
+void setFontSystem() {
+    setFontBySize(getSystemFontSize());
+}
+
+void setFontSecondary() {
+    setFontBySize(getSecondaryFontSize());
+}
+
+static int getHorizontalPaddingForFont(int fontSize) {
+    return resolveFontSize(fontSize) == FONT_SIZE_TINY ? 1 : 2;
+}
+
+int getHeaderHeight(int fontSize) {
+    return getFontMetrics(fontSize).lineHeight + 3;
+}
+
+int getHeaderBaselineY(int fontSize) {
+    return getFontMetrics(fontSize).baselineOffset + 1;
+}
+
+int getFooterHeight(int fontSize) {
+    return getFontMetrics(fontSize).lineHeight + 2;
+}
+
+int getFooterSeparatorY(int fontSize) {
+    return SCREEN_HEIGHT - getFooterHeight(fontSize);
+}
+
+int getFooterBaselineY(int fontSize) {
+    return SCREEN_HEIGHT - getHorizontalPaddingForFont(fontSize);
+}
+
+int getContentAreaTop(int fontSize) {
+    return getHeaderHeight(fontSize) + 2;
+}
+
+int getContentBaselineStart(int fontSize) {
+    return getContentAreaTop(fontSize) + getFontMetrics(fontSize).baselineOffset;
+}
+
+int getContentBottom(int fontSize) {
+    return getFooterSeparatorY(fontSize) - 1;
+}
+
+int getContentHeight(int fontSize) {
+    return getContentBottom(fontSize) - getContentAreaTop(fontSize) + 1;
+}
+
+int getListLineHeight(int fontSize) {
+    return getFontMetrics(fontSize).lineHeight;
+}
+
+int getVisibleListRows(int fontSize) {
+    return max(1, getContentHeight(fontSize) / getListLineHeight(fontSize));
+}
+
+int getHighlightTop(int baselineY, int fontSize) {
+    return baselineY - getFontMetrics(fontSize).glyphTopOffset;
+}
+
+int getHighlightHeight(int fontSize) {
+    return getFontMetrics(fontSize).boxHeight;
+}
+
+int getHighlightPaddingX(int fontSize) {
+    return getHorizontalPaddingForFont(fontSize);
+}
 
 // ==========================================================================
 // TOAST STATE
@@ -31,18 +179,23 @@ static unsigned long toastEndTime = 0;
 // ==========================================================================
 
 void drawHeader(const char* title, const char* rightText) {
-    // Draw inverted header bar
-    u8g2.drawBox(0, 0, SCREEN_WIDTH, HEADER_HEIGHT);
+    const int fontSize = getSystemFontSize();
+    const int headerHeight = getHeaderHeight(fontSize);
+    const int baselineY = getHeaderBaselineY(fontSize);
+    const int padX = getHorizontalPaddingForFont(fontSize);
+
+    u8g2.drawBox(0, 0, SCREEN_WIDTH, headerHeight);
     u8g2.setDrawColor(0);
-    u8g2.setFont(FONT_SMALL);
-    
-    // Left-aligned title
-    u8g2.drawStr(2, 9, title);
-    
-    // Optional right-aligned text
-    if (rightText != nullptr) {
-        int textWidth = u8g2.getStrWidth(rightText);
-        u8g2.drawStr(SCREEN_WIDTH - textWidth - 2, 9, rightText);
+    setFontSystem();
+
+    String right = rightText ? truncateStringToWidth(String(rightText), (SCREEN_WIDTH / 2) - (padX * 2)) : String("");
+    int rightWidth = right.length() > 0 ? u8g2.getUTF8Width(right.c_str()) : 0;
+    int titleMaxWidth = SCREEN_WIDTH - (padX * 2) - (rightWidth > 0 ? rightWidth + padX + 1 : 0);
+    String titleText = truncateStringToWidth(String(title ? title : ""), max(1, titleMaxWidth));
+    u8g2.drawUTF8(padX, baselineY, titleText.c_str());
+
+    if (rightWidth > 0) {
+        u8g2.drawUTF8(SCREEN_WIDTH - rightWidth - padX, baselineY, right.c_str());
     }
     
     u8g2.setDrawColor(1);
@@ -58,29 +211,55 @@ void drawHeaderWithIcon(const char* title, char icon) {
 // ==========================================================================
 
 void drawFooter(const char* text) {
-    u8g2.setFont(FONT_SMALL);
-    u8g2.drawHLine(0, SCREEN_HEIGHT - FOOTER_HEIGHT - 1, SCREEN_WIDTH);
-    
-    // Center text
-    int textWidth = u8g2.getStrWidth(text);
+    const int fontSize = getSystemFontSize();
+    const int baselineY = getFooterBaselineY(fontSize);
+    const int separatorY = getFooterSeparatorY(fontSize);
+    const int maxWidth = SCREEN_WIDTH - (getHorizontalPaddingForFont(fontSize) * 2);
+
+    setFontSystem();
+    u8g2.drawHLine(0, separatorY, SCREEN_WIDTH);
+
+    String footerText = truncateStringToWidth(String(text ? text : ""), maxWidth);
+    int textWidth = u8g2.getUTF8Width(footerText.c_str());
     int x = (SCREEN_WIDTH - textWidth) / 2;
-    u8g2.drawStr(x, SCREEN_HEIGHT - 2, text);
+    u8g2.drawUTF8(x, baselineY, footerText.c_str());
 }
 
 void drawFooterHints(const char* leftHint, const char* rightHint) {
-    u8g2.setFont(FONT_SMALL);
-    u8g2.drawHLine(0, SCREEN_HEIGHT - FOOTER_HEIGHT - 1, SCREEN_WIDTH);
-    
-    // Left hint
-    if (leftHint != nullptr) {
-        u8g2.drawStr(2, SCREEN_HEIGHT - 2, leftHint);
+    const int fontSize = getSystemFontSize();
+    const int baselineY = getFooterBaselineY(fontSize);
+    const int separatorY = getFooterSeparatorY(fontSize);
+    const int padX = getHorizontalPaddingForFont(fontSize);
+    const int halfWidth = (SCREEN_WIDTH - SCROLLBAR_WIDTH - (padX * 3)) / 2;
+
+    setFontSystem();
+    u8g2.drawHLine(0, separatorY, SCREEN_WIDTH);
+
+    if (leftHint != nullptr && leftHint[0] != '\0') {
+        String left = truncateStringToWidth(String(leftHint), halfWidth);
+        u8g2.drawUTF8(padX, baselineY, left.c_str());
     }
-    
-    // Right hint (offset from scrollbar area)
-    if (rightHint != nullptr) {
-        int textWidth = u8g2.getStrWidth(rightHint);
-        u8g2.drawStr(SCREEN_WIDTH - textWidth - SCROLLBAR_WIDTH - 4, SCREEN_HEIGHT - 2, rightHint);
+
+    if (rightHint != nullptr && rightHint[0] != '\0') {
+        String right = truncateStringToWidth(String(rightHint), halfWidth);
+        int textWidth = u8g2.getUTF8Width(right.c_str());
+        u8g2.drawUTF8(SCREEN_WIDTH - textWidth - SCROLLBAR_WIDTH - padX, baselineY, right.c_str());
     }
+}
+
+static void resolveListConfig(const ListConfig& config,
+                              int& startY,
+                              int& visibleItems,
+                              int& lineHeight,
+                              int& leftMargin) {
+    const int fontSize = getSystemFontSize();
+    const int padX = getHorizontalPaddingForFont(fontSize);
+    const int selectorWidth = u8g2.getUTF8Width(">") + padX + 1;
+
+    startY = config.startY >= 0 ? config.startY : getContentBaselineStart(fontSize);
+    lineHeight = config.lineHeight > 0 ? config.lineHeight : getListLineHeight(fontSize);
+    visibleItems = config.visibleItems > 0 ? config.visibleItems : max(1, getContentHeight(fontSize) / lineHeight);
+    leftMargin = config.leftMargin >= 0 ? config.leftMargin : (config.showSelector ? selectorWidth : padX);
 }
 
 // ==========================================================================
@@ -89,76 +268,86 @@ void drawFooterHints(const char* leftHint, const char* rightHint) {
 
 void drawList(const char* const* items, int itemCount, int selectedIndex,
               int scrollOffset, const ListConfig& config) {
-    u8g2.setFont(FONT_SMALL);
+    setFontSystem();
+    int startY = 0;
+    int visibleItems = 0;
+    int lineHeight = 0;
+    int leftMargin = 0;
+    resolveListConfig(config, startY, visibleItems, lineHeight, leftMargin);
+    const int fontSize = getSystemFontSize();
+    const int textMaxWidth = SCREEN_WIDTH - leftMargin - (config.showScrollbar ? SCROLLBAR_WIDTH + 4 : 2);
     
-    for (int i = 0; i < config.visibleItems && (scrollOffset + i) < itemCount; i++) {
+    for (int i = 0; i < visibleItems && (scrollOffset + i) < itemCount; i++) {
         int idx = scrollOffset + i;
-        int y = config.startY + (i * config.lineHeight);
+        int y = startY + (i * lineHeight);
         
-        // Draw selector arrow
         if (config.showSelector && idx == selectedIndex) {
-            u8g2.drawStr(0, y, ">");
+            u8g2.drawUTF8(0, y, ">");
         }
         
-        // Highlight selected item
         if (idx == selectedIndex) {
-            u8g2.drawBox(config.leftMargin - 2, y - 8, 
-                        SCREEN_WIDTH - config.leftMargin - SCROLLBAR_WIDTH - 2, 
-                        config.lineHeight);
+            u8g2.drawBox(leftMargin - getHighlightPaddingX(fontSize),
+                         getHighlightTop(y, fontSize),
+                         SCREEN_WIDTH - leftMargin - (config.showScrollbar ? SCROLLBAR_WIDTH + 2 : 1),
+                         getHighlightHeight(fontSize));
             u8g2.setDrawColor(0);
         }
         
-        u8g2.drawStr(config.leftMargin, y, items[idx]);
+        String itemText = truncateStringToWidth(String(items[idx] ? items[idx] : ""), max(1, textMaxWidth));
+        u8g2.drawUTF8(leftMargin, y, itemText.c_str());
         u8g2.setDrawColor(1);
     }
     
-    // Draw scrollbar if needed
-    if (config.showScrollbar && itemCount > config.visibleItems) {
-        int scrollHeight = config.visibleItems * config.lineHeight;
+    if (config.showScrollbar && itemCount > visibleItems) {
+        int scrollHeight = visibleItems * lineHeight;
         drawScrollbar(SCREEN_WIDTH - SCROLLBAR_WIDTH - 1, 
-                      config.startY - 8,
+                      getHighlightTop(startY, fontSize),
                       scrollHeight, 
                       itemCount, 
-                      config.visibleItems, 
+                      visibleItems, 
                       scrollOffset);
     }
 }
 
 void drawStringList(const String* items, int itemCount, int selectedIndex,
                     int scrollOffset, const ListConfig& config) {
-    u8g2.setFont(FONT_SMALL);
+    setFontSystem();
+    int startY = 0;
+    int visibleItems = 0;
+    int lineHeight = 0;
+    int leftMargin = 0;
+    resolveListConfig(config, startY, visibleItems, lineHeight, leftMargin);
+    const int fontSize = getSystemFontSize();
+    const int textMaxWidth = SCREEN_WIDTH - leftMargin - (config.showScrollbar ? SCROLLBAR_WIDTH + 4 : 2);
     
-    for (int i = 0; i < config.visibleItems && (scrollOffset + i) < itemCount; i++) {
+    for (int i = 0; i < visibleItems && (scrollOffset + i) < itemCount; i++) {
         int idx = scrollOffset + i;
-        int y = config.startY + (i * config.lineHeight);
+        int y = startY + (i * lineHeight);
         
-        // Draw selector arrow
         if (config.showSelector && idx == selectedIndex) {
-            u8g2.drawStr(0, y, ">");
+            u8g2.drawUTF8(0, y, ">");
         }
         
-        // Highlight selected item
         if (idx == selectedIndex) {
-            u8g2.drawBox(config.leftMargin - 2, y - 8, 
-                        SCREEN_WIDTH - config.leftMargin - SCROLLBAR_WIDTH - 2, 
-                        config.lineHeight);
+            u8g2.drawBox(leftMargin - getHighlightPaddingX(fontSize),
+                         getHighlightTop(y, fontSize),
+                         SCREEN_WIDTH - leftMargin - (config.showScrollbar ? SCROLLBAR_WIDTH + 2 : 1),
+                         getHighlightHeight(fontSize));
             u8g2.setDrawColor(0);
         }
         
-        // Truncate long strings
-        String displayStr = truncateString(items[idx], 18);
-        u8g2.drawStr(config.leftMargin, y, displayStr.c_str());
+        String displayStr = truncateStringToWidth(items[idx], max(1, textMaxWidth));
+        u8g2.drawUTF8(leftMargin, y, displayStr.c_str());
         u8g2.setDrawColor(1);
     }
     
-    // Draw scrollbar if needed
-    if (config.showScrollbar && itemCount > config.visibleItems) {
-        int scrollHeight = config.visibleItems * config.lineHeight;
+    if (config.showScrollbar && itemCount > visibleItems) {
+        int scrollHeight = visibleItems * lineHeight;
         drawScrollbar(SCREEN_WIDTH - SCROLLBAR_WIDTH - 1,
-                      config.startY - 8,
+                      getHighlightTop(startY, fontSize),
                       scrollHeight,
                       itemCount,
-                      config.visibleItems,
+                      visibleItems,
                       scrollOffset);
     }
 }
@@ -189,15 +378,19 @@ void drawHighlight(int x, int y, int width, int height) {
 }
 
 void drawSelectableText(int x, int y, const char* text, bool selected, int width) {
-    u8g2.setFont(FONT_SMALL);
+    const int fontSize = getSystemFontSize();
+    setFontSystem();
     
     if (selected) {
-        int w = (width > 0) ? width : u8g2.getStrWidth(text) + 4;
-        u8g2.drawBox(x - 2, y - 8, w, LINE_HEIGHT);
+        int w = (width > 0) ? width : u8g2.getUTF8Width(text) + (getHighlightPaddingX(fontSize) * 2);
+        u8g2.drawBox(x - getHighlightPaddingX(fontSize),
+                     getHighlightTop(y, fontSize),
+                     w,
+                     getHighlightHeight(fontSize));
         u8g2.setDrawColor(0);
     }
     
-    u8g2.drawStr(x, y, text);
+    u8g2.drawUTF8(x, y, text);
     u8g2.setDrawColor(1);
 }
 
@@ -222,96 +415,99 @@ void drawCenteredPopup(int width, int height, bool clearBackground) {
 
 void drawContextMenu(const char* const* items, int itemCount, int selectedIndex,
                      int x, int y) {
-    // Calculate menu dimensions
-    u8g2.setFont(FONT_SMALL);
+    const FontMetrics& metrics = getSystemFontMetrics();
+    const int padX = getHighlightPaddingX() + 3;
+    const int padY = 3;
+
+    setFontSystem();
     int maxWidth = 0;
     for (int i = 0; i < itemCount; i++) {
-        int w = u8g2.getStrWidth(items[i]);
+        int w = u8g2.getUTF8Width(items[i]);
         if (w > maxWidth) maxWidth = w;
     }
     
-    int menuWidth = maxWidth + 12;
-    int menuHeight = itemCount * LINE_HEIGHT + 6;
-    
-    // Draw frame
+    int menuWidth = maxWidth + (padX * 2);
+    int menuHeight = itemCount * metrics.lineHeight + (padY * 2);
+
     drawPopupFrame(x, y, menuWidth, menuHeight, true);
     
-    // Draw items
     for (int i = 0; i < itemCount; i++) {
-        int itemY = y + 10 + (i * LINE_HEIGHT);
-        drawSelectableText(x + 4, itemY, items[i], i == selectedIndex, menuWidth - 8);
+        int itemY = y + padY + metrics.baselineOffset + (i * metrics.lineHeight);
+        drawSelectableText(x + padX, itemY, items[i], i == selectedIndex, menuWidth - (padX * 2));
     }
 }
 
 void drawYesNoDialog(const char* message, bool yesSelected) {
-    // Draw popup frame
+    const FontMetrics& metrics = getSystemFontMetrics();
     drawPopupFrame(10, 12, 108, 40, true);
-    
-    // Draw message
-    u8g2.setFont(FONT_SMALL);
-    int msgWidth = u8g2.getStrWidth(message);
+
+    setFontSystem();
+    String msg = truncateStringToWidth(String(message ? message : ""), 96);
+    int msgWidth = u8g2.getUTF8Width(msg.c_str());
     int msgX = (SCREEN_WIDTH - msgWidth) / 2;
-    u8g2.drawStr(msgX, 28, message);
-    
-    // Draw YES / NO buttons
+    int msgY = 12 + 6 + metrics.baselineOffset;
+    u8g2.drawUTF8(msgX, msgY, msg.c_str());
+
     const int buttonY = 44;
     const int buttonWidth = 30;
     const int yesX = 25;
     const int noX = 73;
-    
-    // YES button
+
     if (yesSelected) {
-        u8g2.drawBox(yesX, buttonY - 8, buttonWidth, LINE_HEIGHT);
+        u8g2.drawBox(yesX, getHighlightTop(buttonY), buttonWidth, getHighlightHeight());
         u8g2.setDrawColor(0);
     }
-    u8g2.drawStr(yesX + 6, buttonY, "YES");
+    u8g2.drawUTF8(yesX + 6, buttonY, "YES");
     u8g2.setDrawColor(1);
-    
-    // NO button
+
     if (!yesSelected) {
-        u8g2.drawBox(noX, buttonY - 8, buttonWidth, LINE_HEIGHT);
+        u8g2.drawBox(noX, getHighlightTop(buttonY), buttonWidth, getHighlightHeight());
         u8g2.setDrawColor(0);
     }
-    u8g2.drawStr(noX + 9, buttonY, "NO");
+    u8g2.drawUTF8(noX + 9, buttonY, "NO");
     u8g2.setDrawColor(1);
 }
 
 void drawMessageDialog(const char* message, const char* buttonLabel, bool invertButton) {
     drawPopupFrame(10, 12, 108, 40, true);
 
-    u8g2.setFont(FONT_SMALL);
-    int msgWidth = u8g2.getStrWidth(message);
+    setFontSystem();
+    String msg = truncateStringToWidth(String(message ? message : ""), 96);
+    int msgWidth = u8g2.getUTF8Width(msg.c_str());
     int msgX = (SCREEN_WIDTH - msgWidth) / 2;
-    u8g2.drawStr(msgX, 28, message);
+    int msgY = 12 + 6 + getSystemFontMetrics().baselineOffset;
+    u8g2.drawUTF8(msgX, msgY, msg.c_str());
 
     const char* label = (buttonLabel != nullptr && buttonLabel[0] != '\0') ? buttonLabel : "OK";
     const int buttonY = 44;
-    int buttonWidth = u8g2.getStrWidth(label) + 12;
+    int buttonWidth = u8g2.getUTF8Width(label) + 12;
     if (buttonWidth < 30) {
         buttonWidth = 30;
     }
     const int buttonX = (SCREEN_WIDTH - buttonWidth) / 2;
 
     if (invertButton) {
-        u8g2.drawBox(buttonX, buttonY - 8, buttonWidth, LINE_HEIGHT);
+        u8g2.drawBox(buttonX, getHighlightTop(buttonY), buttonWidth, getHighlightHeight());
         u8g2.setDrawColor(0);
     } else {
-        u8g2.drawFrame(buttonX, buttonY - 8, buttonWidth, LINE_HEIGHT);
+        u8g2.drawFrame(buttonX, getHighlightTop(buttonY), buttonWidth, getHighlightHeight());
         u8g2.setDrawColor(1);
     }
-    int labelWidth = u8g2.getStrWidth(label);
+    int labelWidth = u8g2.getUTF8Width(label);
     int labelX = buttonX + (buttonWidth - labelWidth) / 2;
-    u8g2.drawStr(labelX, buttonY, label);
+    u8g2.drawUTF8(labelX, buttonY, label);
     u8g2.setDrawColor(1);
 }
 
 void drawThreeOptionDialog(const char* message, const char* const labels[3], int selectedIndex) {
     drawPopupFrame(6, 10, 116, 44, true);
 
-    u8g2.setFont(FONT_SMALL);
-    int msgWidth = u8g2.getStrWidth(message);
+    setFontSystem();
+    String msg = truncateStringToWidth(String(message ? message : ""), 104);
+    int msgWidth = u8g2.getUTF8Width(msg.c_str());
     int msgX = (SCREEN_WIDTH - msgWidth) / 2;
-    u8g2.drawStr(msgX, 24, message);
+    int msgY = 10 + 6 + getSystemFontMetrics().baselineOffset;
+    u8g2.drawUTF8(msgX, msgY, msg.c_str());
 
     const int buttonY = 41;
     const int buttonWidth = 30;
@@ -319,12 +515,12 @@ void drawThreeOptionDialog(const char* message, const char* const labels[3], int
     for (int i = 0; i < 3; i++) {
         const char* label = labels[i] ? labels[i] : "";
         if (selectedIndex == i) {
-            u8g2.drawBox(buttonXs[i], buttonY - 8, buttonWidth, LINE_HEIGHT);
+            u8g2.drawBox(buttonXs[i], getHighlightTop(buttonY), buttonWidth, getHighlightHeight());
             u8g2.setDrawColor(0);
         }
-        int labelWidth = u8g2.getStrWidth(label);
+        int labelWidth = u8g2.getUTF8Width(label);
         int labelX = buttonXs[i] + (buttonWidth - labelWidth) / 2;
-        u8g2.drawStr(labelX, buttonY, label);
+        u8g2.drawUTF8(labelX, buttonY, label);
         u8g2.setDrawColor(1);
     }
 }
@@ -344,14 +540,15 @@ bool updateToast() {
         return false;
     }
     
-    // Draw toast at bottom
-    u8g2.setFont(FONT_SMALL);
-    int msgWidth = u8g2.getStrWidth(toastMessage.c_str());
+    setFontSystem();
+    String message = truncateStringToWidth(toastMessage, SCREEN_WIDTH - 12);
+    int msgWidth = u8g2.getUTF8Width(message.c_str());
     int boxWidth = msgWidth + 8;
     int boxX = (SCREEN_WIDTH - boxWidth) / 2;
+    int boxY = getFooterSeparatorY() - getSystemFontMetrics().boxHeight - 2;
     
-    u8g2.drawFrame(boxX, 54, boxWidth, 10);
-    u8g2.drawStr(boxX + 4, 62, toastMessage.c_str());
+    u8g2.drawFrame(boxX, boxY, boxWidth, getSystemFontMetrics().boxHeight + 2);
+    u8g2.drawUTF8(boxX + 4, boxY + getSystemFontMetrics().baselineOffset + 1, message.c_str());
     
     return true;
 }
@@ -366,25 +563,29 @@ void clearToast() {
 // ==========================================================================
 
 void drawGameOver(const char* title, int score, const char* restartHint) {
-    u8g2.setFont(FONT_TITLE);
-    int titleWidth = u8g2.getStrWidth(title);
-    u8g2.drawStr((SCREEN_WIDTH - titleWidth) / 2, 24, title);
+    setFontSystem();
+    String titleText = truncateStringToWidth(String(title ? title : ""), SCREEN_WIDTH - 4);
+    int titleWidth = u8g2.getUTF8Width(titleText.c_str());
+    int titleY = getContentBaselineStart();
+    u8g2.drawUTF8((SCREEN_WIDTH - titleWidth) / 2, titleY, titleText.c_str());
     
-    u8g2.setFont(FONT_SMALL);
+    setFontSecondary();
     char scoreStr[20];
     snprintf(scoreStr, sizeof(scoreStr), "Score: %d", score);
-    int scoreWidth = u8g2.getStrWidth(scoreStr);
-    u8g2.drawStr((SCREEN_WIDTH - scoreWidth) / 2, 38, scoreStr);
+    int scoreWidth = u8g2.getUTF8Width(scoreStr);
+    int scoreY = titleY + getSystemFontMetrics().lineHeight + getSecondaryFontMetrics().baselineOffset;
+    u8g2.drawUTF8((SCREEN_WIDTH - scoreWidth) / 2, scoreY, scoreStr);
     
-    int hintWidth = u8g2.getStrWidth(restartHint);
-    u8g2.drawStr((SCREEN_WIDTH - hintWidth) / 2, 55, restartHint);
+    String hint = truncateStringToWidth(String(restartHint ? restartHint : ""), SCREEN_WIDTH - 4);
+    int hintWidth = u8g2.getUTF8Width(hint.c_str());
+    u8g2.drawUTF8((SCREEN_WIDTH - hintWidth) / 2, getFooterBaselineY(), hint.c_str());
 }
 
 void drawScore(int x, int y, const char* label, int value) {
-    u8g2.setFont(FONT_SMALL);
+    setFontSystem();
     char str[32];
     snprintf(str, sizeof(str), "%s%d", label, value);
-    u8g2.drawStr(x, y, str);
+    u8g2.drawUTF8(x, y, str);
 }
 
 // ==========================================================================
@@ -449,6 +650,32 @@ String truncateString(const String& str, int maxChars) {
     return str.substring(0, maxChars - 3) + "...";
 }
 
+String truncateStringToWidth(const String& str, int maxWidth, const char* ellipsis) {
+    if (maxWidth <= 0) {
+        return "";
+    }
+
+    if (u8g2.getUTF8Width(str.c_str()) <= maxWidth) {
+        return str;
+    }
+
+    String suffix = (ellipsis != nullptr) ? String(ellipsis) : String("...");
+    if (u8g2.getUTF8Width(suffix.c_str()) > maxWidth) {
+        return "";
+    }
+
+    String candidate = str;
+    while (candidate.length() > 0) {
+        candidate.remove(candidate.length() - 1);
+        String withSuffix = candidate + suffix;
+        if (u8g2.getUTF8Width(withSuffix.c_str()) <= maxWidth) {
+            return withSuffix;
+        }
+    }
+
+    return suffix;
+}
+
 int centerTextX(const char* text) {
     int textWidth = u8g2.getStrWidth(text);
     return (SCREEN_WIDTH - textWidth) / 2;
@@ -458,16 +685,20 @@ int getTextWidth(const char* text) {
     return u8g2.getStrWidth(text);
 }
 
+void setFontTiny() {
+    setFontBySize(FONT_SIZE_TINY);
+}
+
 void setFontSmall() {
-    u8g2.setFont(FONT_SMALL);
+    setFontBySize(FONT_SIZE_SMALL);
 }
 
 void setFontMedium() {
-    u8g2.setFont(FONT_MEDIUM);
+    setFontBySize(FONT_SIZE_MEDIUM);
 }
 
 void setFontLarge() {
-    u8g2.setFont(FONT_TITLE);
+    setFontMedium();
 }
 
 } // namespace GUI

@@ -25,6 +25,12 @@ namespace LuaVM {
 
 static lua_State* L = nullptr;
 static String lastError = "";
+static int luaCurrentFontSize = GUI::FONT_SIZE_SMALL;
+static bool luaUsesSystemFont = true;
+
+static void applyLuaCurrentFont() {
+    GUI::setFontBySize(luaUsesSystemFont ? GUI::getSystemFontSize() : luaCurrentFontSize);
+}
 
 // Lua error handler that appends a stack traceback
 static int luaTraceback(lua_State* L) {
@@ -370,17 +376,52 @@ static int lua_gfx_text(lua_State* L) {
     return 0;
 }
 
-// gfx.setFont(size) - Set font size (0=small, 1=medium, 2=large, 3=tiny)
-static int lua_gfx_setFont(lua_State* L) {
-    int size = luaL_optinteger(L, 1, 0);
-    switch (size) {
-        case 0: u8g2.setFont(u8g2_font_5x7_tf); break;
-        case 1: u8g2.setFont(u8g2_font_6x10_tf); break;
-        case 2: u8g2.setFont(u8g2_font_8x13_tf); break;
-        case 3: u8g2.setFont(u8g2_font_4x6_tf); break;
-        default: u8g2.setFont(u8g2_font_5x7_tf); break;
+static int parseLuaFontSize(lua_State* L, int index) {
+    if (lua_isnoneornil(L, index)) {
+        return GUI::getSystemFontSize();
     }
+
+    if (lua_type(L, index) == LUA_TSTRING) {
+        const char* name = lua_tostring(L, index);
+        if (strcmp(name, "tiny") == 0) return GUI::FONT_SIZE_TINY;
+        if (strcmp(name, "small") == 0) return GUI::FONT_SIZE_SMALL;
+        if (strcmp(name, "medium") == 0) return GUI::FONT_SIZE_MEDIUM;
+        if (strcmp(name, "large") == 0) return GUI::FONT_SIZE_MEDIUM;
+        return GUI::FONT_SIZE_SMALL;
+    }
+
+    int legacySize = luaL_checkinteger(L, index);
+    switch (legacySize) {
+        case 0: return GUI::FONT_SIZE_SMALL;
+        case 1: return GUI::FONT_SIZE_MEDIUM;
+        case 2: return GUI::FONT_SIZE_MEDIUM;
+        case 3: return GUI::FONT_SIZE_TINY;
+        default: return GUI::FONT_SIZE_SMALL;
+    }
+}
+
+static const char* getLuaFontName(int fontSize) {
+    switch (fontSize) {
+        case GUI::FONT_SIZE_TINY: return "tiny";
+        case GUI::FONT_SIZE_MEDIUM: return "medium";
+        case GUI::FONT_SIZE_SMALL:
+        default: return "small";
+    }
+}
+
+// gfx.setFont(size) - Set font size ("tiny"|"small"|"medium", plus legacy numeric aliases)
+static int lua_gfx_setFont(lua_State* L) {
+    luaUsesSystemFont = lua_isnoneornil(L, 1);
+    luaCurrentFontSize = parseLuaFontSize(L, 1);
+    applyLuaCurrentFont();
     return 0;
+}
+
+// gfx.textWidth(str) - Measure text width in current font
+static int lua_gfx_textWidth(lua_State* L) {
+    const char* str = luaL_checkstring(L, 1);
+    lua_pushinteger(L, u8g2.getUTF8Width(str));
+    return 1;
 }
 
 // gfx.setColor(color) - Set draw color (0=black, 1=white)
@@ -415,6 +456,7 @@ static void registerGfxModule(lua_State* L) {
         {"fillCircle", lua_gfx_fillCircle},
         {"text", lua_gfx_text},
         {"setFont", lua_gfx_setFont},
+        {"textWidth", lua_gfx_textWidth},
         {"setColor", lua_gfx_setColor},
         {"width", lua_gfx_width},
         {"height", lua_gfx_height},
@@ -422,6 +464,18 @@ static void registerGfxModule(lua_State* L) {
     };
     
     luaL_newlib(L, gfx_funcs);
+    lua_pushliteral(L, "tiny");
+    lua_setfield(L, -2, "tiny");
+    lua_pushliteral(L, "small");
+    lua_setfield(L, -2, "small");
+    lua_pushliteral(L, "medium");
+    lua_setfield(L, -2, "medium");
+    lua_pushliteral(L, "tiny");
+    lua_setfield(L, -2, "FONT_TINY");
+    lua_pushliteral(L, "small");
+    lua_setfield(L, -2, "FONT_SMALL");
+    lua_pushliteral(L, "medium");
+    lua_setfield(L, -2, "FONT_MEDIUM");
     lua_setglobal(L, "gfx");
 }
 
@@ -805,6 +859,72 @@ static int lua_ui_choice3(lua_State* L) {
     return 0;
 }
 
+static int lua_ui_metrics(lua_State* L) {
+    const int fontSize = parseLuaFontSize(L, 1);
+    const GUI::FontMetrics& metrics = GUI::getFontMetrics(fontSize);
+
+    lua_newtable(L);
+
+    lua_pushstring(L, getLuaFontName(fontSize));
+    lua_setfield(L, -2, "font");
+
+    lua_pushstring(L, getLuaFontName(GUI::getSecondaryFontSize(fontSize)));
+    lua_setfield(L, -2, "secondary_font");
+
+    lua_pushinteger(L, metrics.lineHeight);
+    lua_setfield(L, -2, "line_height");
+
+    lua_pushinteger(L, metrics.baselineOffset);
+    lua_setfield(L, -2, "baseline_offset");
+
+    lua_pushinteger(L, metrics.glyphTopOffset);
+    lua_setfield(L, -2, "glyph_top_offset");
+
+    lua_pushinteger(L, metrics.boxHeight);
+    lua_setfield(L, -2, "box_height");
+
+    lua_pushinteger(L, GUI::getHeaderHeight(fontSize));
+    lua_setfield(L, -2, "header_height");
+
+    lua_pushinteger(L, GUI::getHeaderBaselineY(fontSize));
+    lua_setfield(L, -2, "header_baseline_y");
+
+    lua_pushinteger(L, GUI::getFooterHeight(fontSize));
+    lua_setfield(L, -2, "footer_height");
+
+    lua_pushinteger(L, GUI::getFooterSeparatorY(fontSize));
+    lua_setfield(L, -2, "footer_separator_y");
+
+    lua_pushinteger(L, GUI::getFooterBaselineY(fontSize));
+    lua_setfield(L, -2, "footer_baseline_y");
+
+    lua_pushinteger(L, GUI::getContentAreaTop(fontSize));
+    lua_setfield(L, -2, "content_top");
+
+    lua_pushinteger(L, GUI::getContentBaselineStart(fontSize));
+    lua_setfield(L, -2, "content_baseline_start");
+
+    lua_pushinteger(L, GUI::getContentBottom(fontSize));
+    lua_setfield(L, -2, "content_bottom");
+
+    lua_pushinteger(L, GUI::getContentHeight(fontSize));
+    lua_setfield(L, -2, "content_height");
+
+    lua_pushinteger(L, GUI::getVisibleListRows(fontSize));
+    lua_setfield(L, -2, "visible_rows");
+
+    lua_pushinteger(L, GUI::SCREEN_WIDTH);
+    lua_setfield(L, -2, "screen_width");
+
+    lua_pushinteger(L, GUI::SCREEN_HEIGHT);
+    lua_setfield(L, -2, "screen_height");
+
+    lua_pushinteger(L, GUI::SCROLLBAR_WIDTH);
+    lua_setfield(L, -2, "scrollbar_width");
+
+    return 1;
+}
+
 static int lua_ui_viewFile(lua_State* L) {
     String path = normalizeFsPath(luaL_checkstring(L, 1));
     const char* label = lua_isnoneornil(L, 2) ? nullptr : luaL_checkstring(L, 2);
@@ -903,6 +1023,7 @@ static void registerUiModule(lua_State* L) {
         {"confirm", lua_ui_confirm},
         {"message", lua_ui_message},
         {"choice3", lua_ui_choice3},
+        {"metrics", lua_ui_metrics},
         {"viewFile", lua_ui_viewFile},
         {"editFile", lua_ui_editFile},
         {"takeEditorResult", lua_ui_takeEditorResult},
@@ -1064,6 +1185,9 @@ bool init() {
     registerFsModule(L);
     registerUiModule(L);
     registerT9Module(L);
+    luaCurrentFontSize = GUI::getSystemFontSize();
+    luaUsesSystemFont = true;
+    applyLuaCurrentFont();
     
     lastError = "";
     Serial.println("[LuaVM] Initialized successfully");
@@ -1074,6 +1198,8 @@ void shutdown() {
     if (L != nullptr) {
         lua_close(L);
         L = nullptr;
+        luaCurrentFontSize = GUI::getSystemFontSize();
+        luaUsesSystemFont = true;
         Serial.println("[LuaVM] Shut down");
     }
 }
@@ -1087,6 +1213,10 @@ bool executeString(const char* script, const char* name) {
         lastError = "Lua VM not initialized";
         return false;
     }
+
+    luaCurrentFontSize = GUI::getSystemFontSize();
+    luaUsesSystemFont = true;
+    applyLuaCurrentFont();
     
     int result = luaL_loadbuffer(L, script, strlen(script), name);
     if (result != LUA_OK) {
@@ -1153,6 +1283,10 @@ bool callGlobalFunction(const char* funcName) {
     if (!lua_isfunction(L, -1)) {
         lua_pop(L, 2);  // pop non-function + error handler
         return true;  // Function doesn't exist — not an error
+    }
+
+    if (strcmp(funcName, "_draw") == 0) {
+        applyLuaCurrentFont();
     }
     
     int result = lua_pcall(L, 0, 0, errIdx);

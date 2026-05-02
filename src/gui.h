@@ -35,12 +35,57 @@ constexpr int VISIBLE_LINES  = CONTENT_HEIGHT / LINE_HEIGHT;  // ~4 lines
 // FONT DEFINITIONS
 // ==========================================================================
 
+constexpr int FONT_SIZE_TINY = 0;
+constexpr int FONT_SIZE_SMALL = 1;
+constexpr int FONT_SIZE_MEDIUM = 2;
+constexpr int FONT_SIZE_COUNT = 3;
+
+struct FontMetrics {
+    const uint8_t* font;
+    int lineHeight;
+    int baselineOffset;
+    int glyphTopOffset;
+    int boxHeight;
+    int cursorHeight;
+    int underlineOffset;
+};
+
 // Standard font set - use these instead of hardcoding font names
 extern const uint8_t* FONT_TINY;      // 4x6  - Minimal, for dense info
 extern const uint8_t* FONT_SMALL;     // 5x7  - Default body text
-extern const uint8_t* FONT_MEDIUM;    // 6x10 - Emphasized text
-extern const uint8_t* FONT_LARGE;     // 8x13 - Section titles
-extern const uint8_t* FONT_TITLE;     // Bold - Main titles/game over
+extern const uint8_t* FONT_MEDIUM;    // 5x8  - Dense emphasized text
+extern const uint8_t* FONT_LARGE;     // Legacy alias of medium
+extern const uint8_t* FONT_TITLE;     // Legacy alias of medium
+
+extern const char* kSystemFontOptionLabels[];
+extern const int kSystemFontOptionCount;
+
+const FontMetrics& getFontMetrics(int fontSize);
+const FontMetrics& getSystemFontMetrics();
+void setFontBySize(int fontSize);
+void setFontSystem();
+int getSystemFontSize();
+int getSystemFontOptionIndex();
+const char* getSystemFontOptionLabel(int index);
+bool setSystemFontOptionIndex(int index);
+int getSecondaryFontSize(int fontSize = -1);
+const FontMetrics& getSecondaryFontMetrics();
+void setFontSecondary();
+int getHeaderHeight(int fontSize = -1);
+int getHeaderBaselineY(int fontSize = -1);
+int getFooterHeight(int fontSize = -1);
+int getFooterSeparatorY(int fontSize = -1);
+int getFooterBaselineY(int fontSize = -1);
+int getContentAreaTop(int fontSize = -1);
+int getContentBaselineStart(int fontSize = -1);
+int getContentBottom(int fontSize = -1);
+int getContentHeight(int fontSize = -1);
+int getListLineHeight(int fontSize = -1);
+int getVisibleListRows(int fontSize = -1);
+int getHighlightTop(int baselineY, int fontSize = -1);
+int getHighlightHeight(int fontSize = -1);
+int getHighlightPaddingX(int fontSize = -1);
+String truncateStringToWidth(const String& str, int maxWidth, const char* ellipsis = "...");
 
 // ==========================================================================
 // HEADER COMPONENTS
@@ -85,12 +130,12 @@ void drawFooterHints(const char* leftHint, const char* rightHint = nullptr);
  * Configuration for list rendering.
  */
 struct ListConfig {
-    int startY        = CONTENT_START_Y;  // Y position of first item
-    int visibleItems  = 4;                // Number of visible items
-    int lineHeight    = LINE_HEIGHT;      // Height per item
+    int startY        = -1;               // Y baseline of first item (-1 = auto)
+    int visibleItems  = 0;                // Number of visible items (0 = auto)
+    int lineHeight    = 0;                // Height per item (0 = auto)
     bool showScrollbar = true;            // Show scrollbar when needed
     bool showSelector  = true;            // Show ">" selector prefix
-    int leftMargin     = 10;              // Text left margin
+    int leftMargin     = -1;              // Text left margin (-1 = auto)
 };
 
 /**
@@ -302,6 +347,11 @@ int centerTextX(const char* text);
  * @return Width in pixels
  */
 int getTextWidth(const char* text);
+
+/**
+ * Set the standard tiny font.
+ */
+void setFontTiny();
 
 /**
  * Set the standard small font.

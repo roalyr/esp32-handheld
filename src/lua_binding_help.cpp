@@ -46,7 +46,12 @@ CUSTOM MODULE: gfx
 - gfx.fillCircle(x, y, r)
 - gfx.text(x, y, str)
 - gfx.setFont(size)
- 0=small, 1=medium, 2=large, 3=tiny.
+ Accepts nil for the current system font, or "tiny", "small", or "medium".
+ Also accepts legacy numeric aliases: 0=small, 1=medium, 2=medium, 3=tiny.
+- gfx.tiny / gfx.small / gfx.medium
+ Named font constants for gfx.setFont(...).
+- gfx.textWidth(str)
+ Measure text width in the current font.
 - gfx.setColor(color)
  0=black, 1=white.
 - gfx.width()
@@ -54,7 +59,7 @@ CUSTOM MODULE: gfx
 
 Example:
  gfx.clear()
- gfx.setFont(0)
+ gfx.setFont(gfx.small)
  gfx.text(2, 10, "Hello")
  gfx.rect(0, 12, 40, 10)
  gfx.send()
@@ -138,6 +143,8 @@ CUSTOM MODULE: ui
 - ui.header(title, rightText)
 - ui.footer(leftHint, rightHint)
 - ui.footerCentered(text)
+- ui.metrics(font)
+ Returns the current layout/font metrics table for nil/current-system or a named font.
 - ui.confirm(message, yesSelected)
  Draws the shared yes/no prompt.
 - ui.message(message, buttonLabel, invertButton)

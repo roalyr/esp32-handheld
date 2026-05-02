@@ -100,6 +100,8 @@ void ClockApp::handleInput(char key) {
 }
 
 void ClockApp::render() {
+    const GUI::FontMetrics& metrics = GUI::getSystemFontMetrics();
+
     if (editMode) {
         GUI::drawHeader("SET TIME");
     } else {
@@ -118,15 +120,14 @@ void ClockApp::render() {
         s = SystemClock::getSeconds();
     }
     
-    // Draw large time display
-    u8g2.setFont(u8g2_font_ncenB14_tr);
+    GUI::setFontSystem();
     
     char timeBuf[12];
     snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d:%02d", h, m, s);
     
     int width = u8g2.getStrWidth(timeBuf);
     int x = (GUI::SCREEN_WIDTH - width) / 2;
-    int y = 38;
+    int y = GUI::getContentBaselineStart() + metrics.lineHeight;
     
     u8g2.drawStr(x, y, timeBuf);
     

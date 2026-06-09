@@ -123,9 +123,22 @@ int main() {
     mkdir("./emulator_sd", 0777);
     mkdir("./emulator_sd/apps", 0777);
 
-    // Copy live Lua scripts and settings if they exist in standard project directories
-    // to populate the virtual SD card immediately.
-    system("cp -rf data/* ./emulator_sd/ 2>/dev/null");
+    // Find the workspace root containing the 'data' directory
+    std::string dataPath = "./data";
+    struct stat st;
+    if (stat("./data", &st) == 0 && S_ISDIR(st.st_mode)) {
+        dataPath = "./data";
+    } else if (stat("../data", &st) == 0 && S_ISDIR(st.st_mode)) {
+        dataPath = "../data";
+    } else if (stat("../../data", &st) == 0 && S_ISDIR(st.st_mode)) {
+        dataPath = "../../data";
+    } else if (stat("../../../data", &st) == 0 && S_ISDIR(st.st_mode)) {
+        dataPath = "../../../data";
+    }
+
+    // Copy live Lua scripts and settings to the virtual SD card's apps folder
+    std::string copyCmd = "cp -rf " + dataPath + "/* ./emulator_sd/apps/ 2>/dev/null";
+    system(copyCmd.c_str());
 
     setup_terminal();
     std::thread keyThread(input_thread);

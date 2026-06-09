@@ -8,7 +8,7 @@
 
 const char LUA_DESKTOP[] = R"LUA(
 local GRID_COLS = 4
-local GRID_ROWS = 2
+local GRID_ROWS = 1
 local PAGE_SIZE = GRID_COLS * GRID_ROWS
 
 local FILE_VIEW_FULL = 1
@@ -248,7 +248,7 @@ local function draw_fallback_icon(tile_x, tile_y)
     local layout = ui.metrics()
     local tile_w = math.floor(layout.screen_width / GRID_COLS)
     local tile_h = math.floor(layout.content_height / GRID_ROWS)
-    local tile_pad_x = layout.font == "tiny" and 1 or 2
+    local tile_pad_x = layout.font == "tiny" and 2 or 3
     local icon_box_w = tile_w - (tile_pad_x * 2)
     local icon_box_h = tile_h - layout.box_height - 1
     local box_w = 11
@@ -274,7 +274,7 @@ local function draw_icon(icon, tile_x, tile_y)
     local layout = ui.metrics()
     local tile_w = math.floor(layout.screen_width / GRID_COLS)
     local tile_h = math.floor(layout.content_height / GRID_ROWS)
-    local tile_pad_x = layout.font == "tiny" and 1 or 2
+    local tile_pad_x = layout.font == "tiny" and 2 or 3
     local icon_box_w = tile_w - (tile_pad_x * 2)
     local icon_box_h = tile_h - layout.box_height - 1
     local normalized = normalize_icon(icon)
@@ -307,7 +307,7 @@ end
 local function centered_label_x(tile_x, text)
     local layout = ui.metrics()
     local tile_w = math.floor(layout.screen_width / GRID_COLS)
-    local tile_pad_x = layout.font == "tiny" and 1 or 2
+    local tile_pad_x = layout.font == "tiny" and 2 or 3
     local label_box_w = tile_w - (tile_pad_x * 2)
     local text_w = math.min(label_box_w, gfx.textWidth(text))
     return tile_x + tile_pad_x + math.floor((label_box_w - text_w) / 2)
@@ -654,7 +654,12 @@ function host:refresh_catalog(preserve_id)
         next_apps[#next_apps + 1] = descriptor
     end
 
-    local root_entries, list_err = fs.list("/")
+    local root_entries, list_err = fs.list("/apps")
+    if not root_entries and list_err == "SD not mounted" then
+        -- Skip fallback if SD is not mounted
+    elseif not root_entries or #root_entries == 0 then
+        root_entries, list_err = fs.list("/")
+    end
     local discovered = {}
     if root_entries then
         for _, entry in ipairs(root_entries) do
@@ -793,9 +798,9 @@ local function draw_desktop_tile(descriptor, x, y, selected)
     local layout = ui.metrics()
     local tile_w = math.floor(layout.screen_width / GRID_COLS)
     local tile_h = math.floor(layout.content_height / GRID_ROWS)
-    local tile_pad_x = layout.font == "tiny" and 1 or 2
+    local tile_pad_x = layout.font == "tiny" and 2 or 3
     local label_box_w = tile_w - (tile_pad_x * 2)
-    local label_box_y = y + tile_h - layout.box_height
+    local label_box_y = y + tile_h - layout.box_height - 1
     local label_char_cap = char_capacity_for_width(label_box_w)
     local label_baseline_y = label_box_y + layout.baseline_offset
     local label = selected and marquee_text(descriptor.name, label_char_cap, host.marquee_tick)

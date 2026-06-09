@@ -26,7 +26,7 @@ static const int kSystemFontOptionToSize[kSystemFontOptionCount] = {
     FONT_SIZE_SMALL,
     FONT_SIZE_TINY,
 };
-static int gSystemFontOptionIndex = 0;
+static int gSystemFontOptionIndex = 2;
 
 const uint8_t* FONT_TINY   = kSystemFontMetrics[FONT_SIZE_TINY].font;
 const uint8_t* FONT_SMALL  = kSystemFontMetrics[FONT_SIZE_SMALL].font;

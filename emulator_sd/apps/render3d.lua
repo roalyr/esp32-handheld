@@ -23,7 +23,9 @@ APP = {
     perspective_enabled = true,
     culling_enabled = true,
     auto_rotate = true,
-    speed_multiplier = 1.0
+    speed_multiplier = 1.0,
+    zoom_factor = 1.0,
+    camera_pan_x = 0.0
 }
 
 -- Winding order must be counter-clockwise when viewed from outside
@@ -126,7 +128,7 @@ function APP:spawnShapes()
         function(size) return self:createPyramid(size) end,
         function(size) return self:createOctahedron(size) end,
         function(size) return self:createSphere(0.3, 4, 6) end
-    end
+    }
     
     local positions = {
         {x = -1.6, y = 0.0, z = 4.5},
@@ -167,6 +169,8 @@ function APP:init()
     self.culling_enabled = true
     self.auto_rotate = true
     self.speed_multiplier = 1.0
+    self.zoom_factor = 1.0
+    self.camera_pan_x = 0.0
 end
 
 local function rotate_x(x, y, z, angle)
@@ -221,15 +225,15 @@ function APP:draw()
     
     local proj_str = self.perspective_enabled and "PERS" or "ORTH"
     local cull_str = self.culling_enabled and "CUL" or "OFF"
-    local rot_str = self.auto_rotate and string.format("%.1fx", self.speed_multiplier) or "MAN"
-    ui.header("3D Renderer", proj_str .. " | " .. cull_str .. " | " .. rot_str)
+    local info_str = string.format("%s|%s Z:%.1f P:%.1f", proj_str:sub(1,1), cull_str:sub(1,1), self.zoom_factor, self.camera_pan_x)
+    ui.header("3D Renderer", info_str)
     
     local layout = ui.metrics()
     local cx = math.floor(layout.screen_width / 2)
     local cy = math.floor((layout.content_top + layout.content_bottom) / 2)
     
-    local fov_scale = 90
-    local ortho_scale = 22
+    local fov_scale = 90 * self.zoom_factor
+    local ortho_scale = 22 * self.zoom_factor
     
     for _, shape in ipairs(self.shapes) do
         local transformed = {}
@@ -238,7 +242,7 @@ function APP:draw()
             rx, ry, rz = rotate_x(rx, ry, rz, shape.rot.x)
             rx, ry, rz = rotate_z(rx, ry, rz, shape.rot.z)
             
-            local wx = rx + shape.pos.x
+            local wx = rx + shape.pos.x - self.camera_pan_x
             local wy = ry + shape.pos.y
             local wz = rz + shape.pos.z
             
@@ -283,7 +287,7 @@ function APP:draw()
         end
     end
     
-    ui.footer("1:Proj 2:Cull 3:Auto 4:New", "ALT+ESC:Exit")
+    ui.footer("1:Proj 2:Cull 3:Auto 4:New", "Arrows: Camera")
 end
 
 function APP:input(key)
@@ -300,32 +304,16 @@ function APP:input(key)
         self:spawnShapes()
         host.notice("Shapes Randomized", 1000)
     elseif key == input.KEY_UP then
-        if self.auto_rotate then
-            self.speed_multiplier = math.min(3.0, self.speed_multiplier + 0.25)
-        else
-            for _, shape in ipairs(self.shapes) do
-                shape.rot.x = shape.rot.x + 0.15
-            end
-        end
+        self.zoom_factor = math.min(3.0, self.zoom_factor + 0.1)
+        host.notice(string.format("Zoom: %.1f", self.zoom_factor), 500)
     elseif key == input.KEY_DOWN then
-        if self.auto_rotate then
-            self.speed_multiplier = math.max(0.0, self.speed_multiplier - 0.25)
-        else
-            for _, shape in ipairs(self.shapes) do
-                shape.rot.x = shape.rot.x - 0.15
-            end
-        end
+        self.zoom_factor = math.max(0.3, self.zoom_factor - 0.1)
+        host.notice(string.format("Zoom: %.1f", self.zoom_factor), 500)
     elseif key == input.KEY_LEFT then
-        if not self.auto_rotate then
-            for _, shape in ipairs(self.shapes) do
-                shape.rot.y = shape.rot.y - 0.15
-            end
-        end
+        self.camera_pan_x = self.camera_pan_x - 0.15
+        host.notice(string.format("Pan: %.2f", self.camera_pan_x), 500)
     elseif key == input.KEY_RIGHT then
-        if not self.auto_rotate then
-            for _, shape in ipairs(self.shapes) do
-                shape.rot.y = shape.rot.y + 0.15
-            end
-        end
+        self.camera_pan_x = self.camera_pan_x + 0.15
+        host.notice(string.format("Pan: %.2f", self.camera_pan_x), 500)
     end
 end

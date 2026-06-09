@@ -47,6 +47,13 @@ bool isReady();
  */
 bool executeString(const char* script, const char* name = "chunk");
 
+/**
+ * Execute a Lua script from a file path on the SD card.
+ * @param path The file path to execute
+ * @return true if execution was successful
+ */
+bool executeFile(const char* path);
+
 // --------------------------------------------------------------------------
 // ERROR HANDLING
 // --------------------------------------------------------------------------

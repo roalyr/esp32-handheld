@@ -162,7 +162,7 @@ void LuaRunnerApp::render() {
 void LuaRunnerApp::handleInput(char key) {
     switch (mode) {
         case BROWSE: {
-            GUI::ScrollState state = {selectedIndex, scrollOffset, fileCount, VISIBLE_LINES};
+            GUI::ScrollState state = {selectedIndex, scrollOffset, fileCount, GUI::VISIBLE_LINES};
             if (GUI::handleListNavigation(state, key)) {
                 selectedIndex = state.selectedIndex;
                 scrollOffset = state.scrollOffset;

@@ -1,44 +1,32 @@
-## CURRENT GOAL: Shift Selection + Clipboard/Undo Editing
-- TARGET_FILE: src/apps/t9_editor.cpp
-- TRUTH_RELIANCE: TRUTH_HARDWARE.md Section 0 (ESP32-S2-Mini memory and PSRAM budget for bounded editor state), Section 0.1 and Section 3 (dedicated SD SPI bus and SD CS pin for existing clipboard/history storage), Section 1 (128x64 ST7920 display constraints for footer density and lower-third popup layout), Section 2 (4x5 key matrix including Shift and arrow navigation); TRUTH_FLASHING.md Quick Reference + Flashing Procedure
+## CURRENT GOAL: ESP32-S3 N16R8 Bring-Up - Standalone GPIO Blink Diagnostic
+- TARGET_FILE: platformio.ini
+- TRUTH_RELIANCE: TRUTH_HARDWARE.md Section 0, Section 0.1, Section 1, Section 2, and Section 3 define the current ESP32-S2-Mini production wiring and therefore justify keeping the first ESP32-S3 step isolated from the live firmware path; TRUTH_FLASHING.md Quick Reference, Why DFU (Not Serial), and Architecture Notes are explicitly LOLIN S2 Mini specific and must not be reused as the ESP32-S3 flashing contract for this milestone.
 - TECHNICAL_CONSTRAINTS:
-  - TRUTH_PROJECT.md is not present in workspace; no additional technical constraints may be inferred beyond explicit Truth files.
+  - TRUTH_PROJECT.md is not present in workspace; no project-global technical constraints are available beyond the explicit TRUTH_*.md files.
 - ATOMIC_TASKS:
-  - [x] TASK_1: Turn the existing long-press Shift stub in the canonical editor into a real selection mode without breaking short-press Shift case cycling.
+  - [x] TASK_1: Add a dedicated non-default ESP32-S3 diagnostic build target that preserves the working ESP32-S2 environment and compiles only a standalone GPIO probe program.
     Required signatures:
-    - src/apps/t9_editor.h:
-      - Keep `bool selectionMode;` and `bool shiftTapPending;` as the existing selection-mode toggle surface owned by `T9EditorApp`.
-      - Keep `EditorOpenMode`, `DocumentSourceKind`, `void requestExit(bool saveRequested);`, and the current clipboard/history helper signatures intact.
-      - Add explicit selection anchor/range state and any local helper methods needed to extend, clear, and query the active selection entirely inside `T9EditorApp`.
-    - src/apps/t9_editor.cpp:
-      - Long-press Shift must toggle selection mode on and off; short-tap Shift must continue to cycle case on release exactly as it does now.
-      - When selection mode is active, `UP/DOWN` must extend the selection endpoint through the existing vertical cursor-movement path, and `LEFT/RIGHT` must extend the selection endpoint by characters from the original cursor anchor.
-      - Selection must track the real document byte range across wrapped lines and newlines rather than acting as a visual-only cursor flag.
-      - Leaving selection mode via long-press Shift must return the editor to normal navigation/input behavior and clear transient selection-only UI state safely.
-      - The editor footer must switch to a compact Shift-mode hint describing arrow-select plus `1/2/3` copy/cut/paste and `7/9` undo/redo, truncated safely to fit the active system font on the 128x64 screen.
+    - platformio.ini:
+      - Keep `[env:lolin_s2_mini]` intact as the current production firmware target.
+      - Add `[env:esp32-s3-n16r8_diag]` using `board = esp32-s3-devkitc-1`, `board_upload.flash_size = 16MB`, `board_build.arduino.memory_type = qio_opi`, `board_build.partitions = default_16MB.csv`, `-DBOARD_HAS_PSRAM`, `-DARDUINO_USB_CDC_ON_BOOT=1`, and a dedicated compile-time define for the diagnostic build.
+      - The diagnostic environment must use `build_src_filter` or an equivalent mechanism so it does not link the current LCD, Lua, SD, or Settings application stack.
+    - Source layout:
+      - Add a standalone diagnostic entry translation unit for the ESP32-S3 probe path instead of reusing the full application boot path in `src/main.cpp`.
+      - The diagnostic pin manifest must be explicit and data-driven in code as a candidate-pin table with skip metadata, not handwritten as repeated one-off `pinMode()` calls.
     Required behavior:
-    - Selection mode starts from the current cursor position at the moment long-press Shift is recognized.
-    - While selection mode is active, arrow keys must not fall through to their normal cursor/navigation/editor-mode side effects.
-    - Holding Shift again exits selection mode and restores normal editor behavior.
+    - Recover the historical ESP32-S3 project pin assignments from git history first and treat them as occupied reference pins, not as the complete safe-to-blink list.
+    - Preserve the existing ESP32-S2 build as the default known-good path while the ESP32-S3 probe target is being brought up.
 
-  - [ ] TASK_2: Add selection actions, a lower-third clipboard chooser, and bounded session undo/redo on top of the existing editor/clipboard infrastructure.
+  - [x] TASK_2: Implement the standalone ESP32-S3 GPIO blink loop so each probe-safe candidate pin is announced over USB CDC serial, blinked in isolation, and then returned to a neutral state before the next candidate.
     Required signatures:
-    - src/apps/t9_editor.h:
-      - Keep `bool writeClipboardSlot(const String& content, int& writtenSlot, String& error);` and `bool readClipboardSlot(int slot, String& content, String& error) const;` as the canonical clipboard persistence surface.
-      - Keep `bool recordPageSnapshot(const char* reason, String& error);` for save-history behavior, but do not repurpose SD save history as interactive per-action undo/redo.
-      - Add explicit session-local undo/redo state and clipboard-popup state inside `T9EditorApp` rather than introducing a second app or external modal owner.
-    - src/apps/t9_editor.cpp:
-      - In selection mode, key `1` must copy the active selection into the rotating clipboard store without changing the document.
-      - In selection mode, key `2` must cut the active selection: copy first, remove the selected range, collapse the cursor to the resulting insertion point, and mark the document dirty.
-      - In selection mode, key `3` must open a clipboard popup in the lower section of the editor screen, ordered newest-first, while keeping the currently edited line and cursor visible above it; `ENTER` pastes the highlighted entry and closes the popup, `ESC`/`BKSP` cancels it.
-      - Paste must insert at the cursor when no selection is active and replace the active selection when one exists.
-      - Key `7` must undo and key `9` must redo bounded in-session edits for RW documents, including selection-driven cut/paste side effects where applicable.
-      - Copy/cut/paste/undo/redo must be blocked safely in RO mode.
-      - Reuse existing GUI metrics/fonts/footer layout where practical; do not add a fullscreen modal that hides the active editing line for clipboard choice.
+    - Standalone diagnostic source:
+      - `void setup()` must initialize `Serial` and any probe-state needed for the candidate sweep.
+      - `void loop()` must own the full diagnostic cycle and must not call the normal firmware `setupHardware()` or enter the Lua or Settings runtime.
+      - Add local helper functions for candidate initialization, per-pin blink execution, and serial reporting; keep these helpers scoped to the diagnostic translation unit.
     Required behavior:
-    - The clipboard chooser must show the latest clipboard entry at the top.
-    - After a paste commit, the clipboard chooser must close immediately and return to the normal editor view.
-    - Undo and redo must be deterministic for capped RW sessions and must not exceed the existing 16 KB editor cap.
-    - Existing whole-file SD save history must remain intact for save persistence, separate from interactive undo/redo.
+    - Exclude flash, PSRAM, USB, and other non-probe-safe ESP32-S3 pins from the active blink table; if a GPIO is deliberately skipped, the serial output must state the skip reason instead of silently omitting it.
+    - Blink one GPIO at a time with a clearly human-observable dwell interval and print the GPIO number before each cycle.
+    - Return each completed GPIO to `INPUT` or another documented neutral safe state before advancing.
+    - Keep the diagnostic independent of LCD, SD card, keypad, and buzzer assumptions so it remains usable even if those circuits or header holes are damaged.
 
-  - [ ] VERIFICATION: Build with ~/.platformio/penv/bin/pio run -e lolin_s2_mini; user manually flashes with bash scripts/flash.sh per TRUTH_FLASHING.md; on-device verify that short-tap Shift still cycles case, long-press Shift toggles selection mode, the footer switches to the new Shift-mode command hint, `UP/DOWN` extend selection through lines, `LEFT/RIGHT` extend selection through characters, key `1` copies, key `2` cuts, key `3` opens a lower-third newest-first clipboard popup without hiding the active line/cursor, `ENTER` pastes and closes the popup, `ESC`/`BKSP` cancels it, key `7` undoes, key `9` redoes, normal editor behavior returns after a second long-press Shift, RO sessions stay non-destructive, and capped RW sessions still save correctly afterward.
+  - [ ] VERIFICATION: `~/.platformio/penv/bin/pio run -e esp32-s3-n16r8_diag` succeeds; user manually flashes the ESP32-S3 board with their chosen method; serial output enumerates the candidate table in order and reports any intentional skips; manual probing confirms which GPIO pads still toggle cleanly before any full ESP32-S3 application port or flashing-script update is attempted.

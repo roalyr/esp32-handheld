@@ -1239,6 +1239,37 @@ bool executeString(const char* script, const char* name) {
     return true;
 }
 
+bool executeFile(const char* path) {
+    if (L == nullptr) {
+        lastError = "Lua VM not initialized";
+        return false;
+    }
+
+    SdSessionGuard session;
+    if (!session.begin()) {
+        lastError = "Failed to start SD session";
+        return false;
+    }
+
+    FsFile file;
+    if (!file.open(path, O_RDONLY)) {
+        lastError = "Failed to open file";
+        return false;
+    }
+
+    size_t size = file.size();
+    std::string buffer;
+    buffer.resize(size);
+    if (file.read(&buffer[0], size) != size) {
+        lastError = "Failed to read file contents";
+        file.close();
+        return false;
+    }
+    file.close();
+
+    return executeString(buffer.c_str(), path);
+}
+
 const char* getLastError() {
     return lastError.c_str();
 }

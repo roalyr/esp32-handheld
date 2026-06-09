@@ -132,17 +132,11 @@ int main() {
 
     setup();
 
-    // Loop target 30 FPS (~33ms per frame)
+    // Run loop continuously with a 1ms sleep to keep CPU usage low
+    // while ensuring pollMatrix is called constantly.
     while (emulatorRunning) {
-        auto frameStart = std::chrono::steady_clock::now();
-        
         loop();
-        
-        auto frameTime = std::chrono::steady_clock::now() - frameStart;
-        auto frameMs = std::chrono::duration_cast<std::chrono::milliseconds>(frameTime).count();
-        if (frameMs < 33) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(33 - frameMs));
-        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     keyThread.join();

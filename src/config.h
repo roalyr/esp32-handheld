@@ -93,6 +93,13 @@ enum AppId {
 #define PHYSICAL_FPS 30
 #define FRAME_DELAY_MS (1000 / PHYSICAL_FPS)
 
+// Emulate slower execution speed of physical microcontrollers on the emulator.
+// Since host PCs run much faster, this adds simulated hardware overhead (ms) per frame.
+//   - 0: Full speed (30 FPS, matches PC emulator default)
+//   - 114: Simulates ESP32-S2-Mini (~6.8 FPS, 350 ticks vs 1540 ticks)
+//   - 33: Simulates ESP32-S3 (~15 FPS)
+#define EMULATOR_FRAME_OVERHEAD_MS 114
+
 #define MULTITAP_TIMEOUT 800   
 #define CURSOR_BLINK_RATE 500
 #define DEFAULT_CONTRAST 200   // Global default contrast (0-255). ST7920 Vop register via U8G2 extended instructions.

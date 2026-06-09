@@ -282,8 +282,11 @@ void loop() {
     pollMatrix();
     
     unsigned long now = millis();
-    
-    if (now - lastFrameTime >= FRAME_DELAY_MS) {
+    unsigned long targetDelay = FRAME_DELAY_MS;
+#ifdef PLATFORM_EMULATOR
+    targetDelay += EMULATOR_FRAME_OVERHEAD_MS;
+#endif
+    if (now - lastFrameTime >= targetDelay) {
         lastFrameTime = now;
         
         // 1. HARDWARE SCAN (finalizes latched keys for this frame)

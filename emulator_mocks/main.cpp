@@ -1,5 +1,8 @@
-// [Revision: v1.0] [Path: emulator_mocks/main.cpp] [Date: 2026-06-09]
-// Description: Main entry point for the desktop emulator, handling raw terminal IO and frames.
+// PROJECT: ESP32-Handheld
+// MODULE: emulator_mocks/main.cpp
+// STATUS: [Level 2 - Implementation]
+// TRUTH_LINK: TRUTH_PROJECT.md § Workflow And Scope Boundary
+// LOG_REF: 2026-06-11 00:08:00
 
 #include "Arduino.h"
 #include <termios.h>
@@ -17,6 +20,7 @@ extern void loop();
 
 struct termios orig_termios;
 std::atomic<bool> emulatorRunning(true);
+extern int emulator_frame_overhead_ms;
 
 void restore_terminal() {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
@@ -103,10 +107,23 @@ void input_thread() {
     }
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    // Parse arguments
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--clock" && i + 1 < argc) {
+            try {
+                emulator_frame_overhead_ms = std::stoi(argv[i + 1]);
+                i++;
+            } catch (...) {
+                std::cerr << "Error: Invalid value for --clock option." << std::endl;
+            }
+        }
+    }
+
     // Make sure stdout is clean
     std::cout << "\033[2J\033[H"; // Clear screen
-    std::cout << "Starting ESP32 Handheld Desktop Emulator...\n";
+    std::cout << "Starting ESP32 Handheld Desktop Emulator (Clock Overhead: " << emulator_frame_overhead_ms << "ms)...\n";
     std::cout << "Controls:\n";
     std::cout << "  - Arrow keys: Up/Down/Left/Right\n";
     std::cout << "  - Enter: Select / Confirm\n";

@@ -1,14 +1,15 @@
-## CURRENT GOAL: Protocol Baseline Verification
-- TARGET_SCOPE: Ensure the project adheres to the MODEL-CASCADE-PROTOCOL.md by validating the existence of core truth files and establishing the role-based workflow.
+## CURRENT GOAL: Emulator Dynamic Clock Rate Command Line Argument
+- TARGET_SCOPE: Parse `--clock <ms>` from command line arguments when running the native emulator to dynamically override the `EMULATOR_FRAME_OVERHEAD_MS` delay without recompiling.
 - TARGET_FILES:
-  - TACTICAL_TODO.md — Establish current sprint
-  - TRUTH_PROJECT.md — Establish tech stack and constraints
-  - SESSION_LOG.md — Initialize logging boundary
-- TRUTH_RELIANCE: MODEL-CASCADE-PROTOCOL.md (Workspace Configuration)
+  - `src/config.h` — Convert the overhead macro to an `extern int emulator_frame_overhead_ms` variable so it can be mutated at runtime.
+  - `src/main.cpp` — Define the global variable and update the frame delay calculation to use it instead of the macro.
+  - `emulator_mocks/main.cpp` — Modify `main()` to accept arguments (`argc`, `argv`), parse `--clock`, and update the global overhead variable.
+- TRUTH_RELIANCE: TRUTH_PROJECT.md § Workflow And Scope Boundary
 - TECHNICAL_CONSTRAINTS: 
-  - Follow the role transitions defined in MODEL-CASCADE-PROTOCOL.md.
+  - Avoid dynamic memory allocation in the main firmware loop.
+  - Keep the emulator logic mimicking hardware closely.
 - ATOMIC_TASKS:
-  - [x] TASK_1: Create `TRUTH_PROJECT.md` outlining the firmware and emulator tech stack, boundaries, and rules.
-  - [x] TASK_2: Create `SESSION_LOG.md` for role-based transition logging.
-  - [x] TASK_3: Clean `TACTICAL_TODO.md` to reflect the new protocol-driven workflow.
-  - [x] VERIFICATION: All necessary read-only truths and read-write state files are present and match protocol requirements.
+  - [x] TASK_1: Refactor `EMULATOR_FRAME_OVERHEAD_MS` into a global variable (`emulator_frame_overhead_ms`) in `src/config.h` and define it in `src/main.cpp` with a default of 114.
+  - [x] TASK_2: Update `int main()` in `emulator_mocks/main.cpp` to `int main(int argc, char* argv[])`.
+  - [x] TASK_3: Parse `argv` for `--clock`. If found, parse the subsequent argument as an integer and assign it to `emulator_frame_overhead_ms`.
+  - [x] VERIFICATION: Build the emulator and run `.pio/build/emulator/program --clock 500`. Verify the emulator artificially slows down and outputs frames much slower while preserving responsive input polling.

@@ -1,13 +1,17 @@
 //
-// PROJECT: ESP32-S2-Mini handheld terminal
+// PROJECT: ESP32-Handheld
 // MODULE: src/main.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TACTICAL_TODO TASK_1
-// LOG_REF: 2026-04-30
+// TRUTH_LINK: TRUTH_PROJECT.md § Workflow And Scope Boundary
+// LOG_REF: 2026-06-11 00:08:00
 //
 
 #include <Arduino.h>
 #include "config.h"
+
+#ifdef PLATFORM_EMULATOR
+int emulator_frame_overhead_ms = 114;
+#endif
 #include "hal.h"
 #include "clock.h"
 #include "gui.h"

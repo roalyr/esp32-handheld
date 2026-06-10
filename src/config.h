@@ -1,9 +1,9 @@
 //
-// PROJECT: ESP32-S2-Mini handheld terminal
+// PROJECT: ESP32-Handheld
 // MODULE: src/config.h
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TRUTH_HARDWARE.md Sections 0.1, 1, 2, 3, 4
-// LOG_REF: 2026-04-01
+// TRUTH_LINK: TRUTH_PROJECT.md § Workflow And Scope Boundary
+// LOG_REF: 2026-06-11 00:08:00
 //
 
 #ifndef CONFIG_H
@@ -98,7 +98,12 @@ enum AppId {
 //   - 0: Full speed (30 FPS, matches PC emulator default)
 //   - 114: Simulates ESP32-S2-Mini (~6.8 FPS, 350 ticks vs 1540 ticks)
 //   - 33: Simulates ESP32-S3 (~15 FPS)
+#ifdef PLATFORM_EMULATOR
+extern int emulator_frame_overhead_ms;
+#define EMULATOR_FRAME_OVERHEAD_MS emulator_frame_overhead_ms
+#else
 #define EMULATOR_FRAME_OVERHEAD_MS 114
+#endif
 
 #define MULTITAP_TIMEOUT 800   
 #define CURSOR_BLINK_RATE 500

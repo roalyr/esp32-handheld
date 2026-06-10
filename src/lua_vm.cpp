@@ -1,8 +1,8 @@
-// PROJECT: ESP32-S2-Mini handheld terminal
+// PROJECT: ESP32-Handheld
 // MODULE: src/lua_vm.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TRUTH_HARDWARE.md Section 0.1, Section 1, Section 3; TACTICAL_TODO TASK_1
-// LOG_REF: 2026-04-30
+// TRUTH_LINK: TRUTH_PROJECT.md § Workflow And Scope Boundary
+// LOG_REF: 2026-06-11 00:37:00
 
 #include "lua_vm.h"
 #include "hal.h"
@@ -12,10 +12,12 @@
 #include "app_control.h"
 #include "app_transfer.h"
 #include "apps/t9_editor.h"
+#include "apps/settings.h"
 #include "t9_engine.h"
 #include <lua.hpp>
 
 extern T9EditorApp appT9Editor;
+extern SettingsApp appSettings;
 
 namespace LuaVM {
 
@@ -658,6 +660,12 @@ static int lua_print(lua_State* L) {
     return 0;
 }
 
+// sys.openSettings() - Open system settings
+static int lua_sys_openSettings(lua_State* L) {
+    launchLuaOwnedApp(&appSettings);
+    return 0;
+}
+
 // Register all system functions
 static void registerSysModule(lua_State* L) {
     static const luaL_Reg sys_funcs[] = {
@@ -668,6 +676,7 @@ static void registerSysModule(lua_State* L) {
         {"timeStr", lua_sys_timeStr},
         {"version", lua_sys_version},
         {"memInfo", lua_sys_memInfo},
+        {"openSettings", lua_sys_openSettings},
         {NULL, NULL}
     };
     

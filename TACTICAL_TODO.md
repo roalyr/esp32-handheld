@@ -1,15 +1,14 @@
-## CURRENT GOAL: Emulator Dynamic Clock Rate Command Line Argument
-- TARGET_SCOPE: Parse `--clock <ms>` from command line arguments when running the native emulator to dynamically override the `EMULATOR_FRAME_OVERHEAD_MS` delay without recompiling.
+## CURRENT GOAL: Crash Popup ESC Closing, Wrench Icon, and Version 1.5 Bump
+- TARGET_SCOPE: Adjust the crash report popup to close on `Esc` rather than `Backspace` to maintain global consistency. Replace the Settings gear icon with a wrench icon. Bump the firmware version from `1.4` to `1.5`.
 - TARGET_FILES:
-  - `src/config.h` — Convert the overhead macro to an `extern int emulator_frame_overhead_ms` variable so it can be mutated at runtime.
-  - `src/main.cpp` — Define the global variable and update the frame delay calculation to use it instead of the macro.
-  - `emulator_mocks/main.cpp` — Modify `main()` to accept arguments (`argc`, `argv`), parse `--clock`, and update the global overhead variable.
-- TRUTH_RELIANCE: TRUTH_PROJECT.md § Workflow And Scope Boundary
-- TECHNICAL_CONSTRAINTS: 
-  - Avoid dynamic memory allocation in the main firmware loop.
-  - Keep the emulator logic mimicking hardware closely.
+  - `src/config.h` — Bump `FIRMWARE_VERSION` to `"1.5"`.
+  - `src/lua_scripts.cpp` — Modify `SETTINGS_ICON` to draw a wrench, change crash popup footer text to `"UP/DN scroll ESC close"`, and update `handle_crash_popup_input` to check for `input.KEY_ESC` instead of `input.KEY_BKSP`.
+- TRUTH_RELIANCE: TRUTH_PROJECT.md § Workflow And Scope Boundary (Emulation vs Hardware)
+- TECHNICAL_CONSTRAINTS:
+  - Keep the codebase modular and aligned with MODEL-CASCADE-PROTOCOL.md constraints.
 - ATOMIC_TASKS:
-  - [x] TASK_1: Refactor `EMULATOR_FRAME_OVERHEAD_MS` into a global variable (`emulator_frame_overhead_ms`) in `src/config.h` and define it in `src/main.cpp` with a default of 114.
-  - [x] TASK_2: Update `int main()` in `emulator_mocks/main.cpp` to `int main(int argc, char* argv[])`.
-  - [x] TASK_3: Parse `argv` for `--clock`. If found, parse the subsequent argument as an integer and assign it to `emulator_frame_overhead_ms`.
-  - [x] VERIFICATION: Build the emulator and run `.pio/build/emulator/program --clock 500`. Verify the emulator artificially slows down and outputs frames much slower while preserving responsive input polling.
+  - [ ] TASK_1: Bump `FIRMWARE_VERSION` in `src/config.h` to `"1.5"`.
+  - [ ] TASK_2: In `src/lua_scripts.cpp`, update `SETTINGS_ICON` to draw a wrench instead of a gear.
+  - [ ] TASK_3: In `src/lua_scripts.cpp`, update `draw_crash_popup` footer text to reference `ESC` instead of `BKSP`.
+  - [ ] TASK_4: In `src/lua_scripts.cpp`, update `host:handle_crash_popup_input` to dismiss on `input.KEY_ESC` instead of `input.KEY_BKSP`.
+  - [ ] VERIFICATION: Compile the emulator target. Verify the settings icon is a wrench. Run a diagnostic test or ensure that the version output from `sys.version()` returns `"1.5"`.

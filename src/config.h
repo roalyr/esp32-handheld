@@ -3,7 +3,7 @@
 // MODULE: src/config.h
 // STATUS: [Level 2 - Implementation]
 // TRUTH_LINK: TRUTH_PROJECT.md § Workflow And Scope Boundary
-// LOG_REF: 2026-06-11 00:08:00
+// LOG_REF: 2026-06-11 00:58:00
 //
 
 #ifndef CONFIG_H
@@ -15,7 +15,7 @@
 // VERSION INFO
 // --------------------------------------------------------------------------
 
-#define FIRMWARE_VERSION "1.4"
+#define FIRMWARE_VERSION "1.5"
 #define FIRMWARE_NAME "ESP32 Handheld"
 
 // --------------------------------------------------------------------------

@@ -304,27 +304,20 @@ void loop() {
         }
         
         const bool escJustPressed = isJustPressed(KEY_ESC);
-        const bool altEscChord = escJustPressed && isKeyActiveNow(KEY_ALT);
 
         // 3. ESC HANDLING (just-pressed only, before app/lua input)
-        if (escJustPressed && !altEscChord) {
+        if (escJustPressed && currentMode == MODE_SETTINGS) {
             lastActivityTime = now;
             
-            if (currentMode == MODE_LUA) {
-                currentMode = MODE_SETTINGS;
+            if (activeSettingsApp != nullptr && activeSettingsApp != &appSettings) {
+                activeSettingsApp->handleInput(KEY_ESC);
+            } else if (appSettings.isInSubmenu()) {
+                // Let settings handle ESC internally (e.g. exit key tester)
+                appSettings.handleInput(KEY_ESC);
+            } else {
+                appSettings.stop();
+                currentMode = MODE_LUA;
                 activeSettingsApp = nullptr;
-                switchApp(&appSettings);
-            } else if (currentMode == MODE_SETTINGS) {
-                if (activeSettingsApp != nullptr && activeSettingsApp != &appSettings) {
-                    activeSettingsApp->handleInput(KEY_ESC);
-                } else if (appSettings.isInSubmenu()) {
-                    // Let settings handle ESC internally (e.g. exit key tester)
-                    appSettings.handleInput(KEY_ESC);
-                } else {
-                    appSettings.stop();
-                    currentMode = MODE_LUA;
-                    activeSettingsApp = nullptr;
-                }
             }
             // ESC consumed — skip to render
         } else {
@@ -355,25 +348,21 @@ void loop() {
                     // Forward queued presses to Lua in order, then held repeats.
                     char key = '\0';
                     while (!luaError && popKeyPressEvent(key)) {
-                        if (key != KEY_ESC || altEscChord) {
-                            lastActivityTime = now;
-                            if (!LuaVM::callInputHandler(key)) {
-                                luaError = true;
-                                luaErrorMsg = LuaVM::getLastError();
-                            }
+                        lastActivityTime = now;
+                        if (!LuaVM::callInputHandler(key)) {
+                            luaError = true;
+                            luaErrorMsg = LuaVM::getLastError();
                         }
                     }
 
                     for (int i = 0; !luaError && i < activeKeyCount; i++) {
                         char heldKey = activeKeys[i];
-                        if (heldKey != KEY_ESC || altEscChord) {
-                            bool shouldFire = isRepeating(heldKey) || isLongPressed(heldKey);
-                            if (shouldFire) {
-                                lastActivityTime = now;
-                                if (!LuaVM::callInputHandler(heldKey)) {
-                                    luaError = true;
-                                    luaErrorMsg = LuaVM::getLastError();
-                                }
+                        bool shouldFire = isRepeating(heldKey) || isLongPressed(heldKey);
+                        if (shouldFire) {
+                            lastActivityTime = now;
+                            if (!LuaVM::callInputHandler(heldKey)) {
+                                luaError = true;
+                                luaErrorMsg = LuaVM::getLastError();
                             }
                         }
                     }

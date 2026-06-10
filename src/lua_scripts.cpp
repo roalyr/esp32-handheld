@@ -1,8 +1,8 @@
-// PROJECT: ESP32-S2-Mini handheld terminal
+// PROJECT: ESP32-Handheld
 // MODULE: src/lua_scripts.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TRUTH_HARDWARE.md Section 1, Section 2, Section 3; TACTICAL_TODO TASK_1
-// LOG_REF: 2026-04-30
+// TRUTH_LINK: TRUTH_PROJECT.md § Workflow And Scope Boundary
+// LOG_REF: 2026-06-11 00:58:00
 
 #include "lua_scripts.h"
 
@@ -35,6 +35,22 @@ local FILE_BROWSER_ICON = {
     "##                      ##",
     " ######################## ",
     "  ######################  "
+}
+
+local SETTINGS_ICON = {
+    "         #####            ",
+    "       #########          ",
+    "      ####    ###         ",
+    "      ###      ##         ",
+    "      ####    ###         ",
+    "       #########          ",
+    "         #####            ",
+    "          #####           ",
+    "           #####          ",
+    "            #####         ",
+    "             #####        ",
+    "              #####       ",
+    "               #######    "
 }
 
 local TRANSITION_KEY_GRACE_MS = 60
@@ -376,7 +392,7 @@ local function draw_crash_popup(title, lines, scroll)
         gfx.text(2, layout.content_baseline_start + row * layout.line_height, truncate(lines[index], wrap_width))
     end
 
-    ui.footerCentered("UP/DN scroll BKSP close")
+    ui.footerCentered("UP/DN scroll ESC close")
 
     if #lines > visible_lines then
         local bar_y = layout.content_top
@@ -513,12 +529,32 @@ local file_browser = {
     selection_memory = {}
 }
 
+local settings_app = {}
+
+function settings_app:init()
+    sys.openSettings()
+    host:close_current_app()
+end
+
+function settings_app:draw()
+end
+
+function settings_app:input(key)
+end
+
 local BUILTIN_APPS = {
     {
         id = "builtin:file_browser",
         name = "Files",
         icon = FILE_BROWSER_ICON,
         app = file_browser,
+        built_in = true
+    },
+    {
+        id = "builtin:settings",
+        name = "Settings",
+        icon = SETTINGS_ICON,
+        app = settings_app,
         built_in = true
     }
 }
@@ -786,7 +822,7 @@ function host:handle_crash_popup_input(key)
         self.crash_scroll = clamp(self.crash_scroll - 1, 1, max_scroll)
     elseif key == input.KEY_DOWN or key == input.KEY_RIGHT then
         self.crash_scroll = clamp(self.crash_scroll + 1, 1, max_scroll)
-    elseif key == input.KEY_BKSP then
+    elseif key == input.KEY_ESC then
         self.crash_popup_active = false
         self.crash_title = nil
         self.crash_lines = {}
@@ -991,7 +1027,7 @@ function host:input(key)
             return
         end
         if self.launch_popup_until ~= 0 then
-            if key == input.KEY_ESC and input.held(input.KEY_ALT) then
+            if key == input.KEY_ESC then
                 self.close_prompt_active = true
                 self.close_prompt_selection = 1
                 self:block_input_until_release()
@@ -999,7 +1035,7 @@ function host:input(key)
             end
             return
         end
-        if key == input.KEY_ESC and input.held(input.KEY_ALT) then
+        if key == input.KEY_ESC then
             self.close_prompt_active = true
             self.close_prompt_selection = 1
             self:block_input_until_release()

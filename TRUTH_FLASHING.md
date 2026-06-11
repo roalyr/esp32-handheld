@@ -2,17 +2,26 @@
 
 ## Quick Reference
 
+### ESP32-S2 (LOLIN S2 Mini)
 ```
-1. Build:           pio run
+1. Build:           bash scripts/build_s2.sh
 2. Enter DFU mode:  hold BOOT → plug in USB (or hold BOOT → tap RST)
 3. Flash firmware:  bash scripts/flash.sh
 4. Flash SPIFFS:    bash scripts/upload_spiffs.sh  (also re-flashes firmware)
 5. Boot:            unplug and re-plug the board (no buttons held)
 ```
 
-Or combined: `pio run && bash scripts/flash.sh` (board must already be in DFU mode).
+Or combined: `bash scripts/build_s2.sh && bash scripts/flash.sh` (board must already be in DFU mode).
 
-`pio run -t upload` also works — it calls `scripts/flash.sh` via the custom upload command in `platformio.ini`.
+`pio run -t upload -e lolin_s2_mini` also works — it calls `scripts/flash.sh` via the custom upload command in `platformio.ini`.
+
+### ESP32-S3 (esp32-s3-n16r8_diag)
+```
+1. Build:           bash scripts/build_s3.sh
+2. Flash firmware:  bash scripts/flash_s3.sh
+```
+(No manual boot-button holding or USB power cycling needed; standard serial DTR/RTS resets the board automatically).
+
 
 ---
 
@@ -84,7 +93,7 @@ built-in Ericsson H5321 mobile broadband modem. The ESP32 typically appears on
 ### 1. Build
 
 ```bash
-pio run -e lolin_s2_mini
+bash scripts/build_s2.sh
 ```
 
 Build artifacts land in `.pio/build/lolin_s2_mini/`:
@@ -211,3 +220,25 @@ partitions + firmware + SPIFFS into a single combined image. This means SPIFFS u
 also re-flashes the firmware (harmless — it's the same binary).
 
 Contents of `data/` are uploaded to the SPIFFS partition via `pio run --target buildfs`.
+
+---
+
+## ESP32-S3 DevKit Bring-up / Diagnostics (esp32-s3-n16r8_diag)
+
+The ESP32-S3 DevKit module has a standard USB-to-UART bridge (or direct hardware CDC with DTR/RTS auto-reset circuitry). It does not require manual boot mode entry or USB unplugging.
+
+### 1. Build S3 Target
+```bash
+bash scripts/build_s3.sh
+```
+This script compiles the standalone diagnostic target: `esp32-s3-n16r8_diag`.
+
+### 2. Flash S3 Target
+```bash
+bash scripts/flash_s3.sh [upload_port]
+```
+This script uploads the compiled S3 firmware using standard serial flashing.
+- It will automatically try to detect the serial port.
+- You can optionally override the target port (e.g., `bash scripts/flash_s3.sh /dev/ttyACM1`).
+- The board automatically resets and boots the diagnostic application immediately after the flashing completes.
+

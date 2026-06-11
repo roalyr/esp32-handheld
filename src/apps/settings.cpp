@@ -1,9 +1,8 @@
-// PROJECT: ESP32-S2-Mini handheld terminal
+// PROJECT: ESP32-Handheld
 // MODULE: src/apps/settings.cpp
 // STATUS: [Level 2 - Implementation]
-// TRUTH_LINK: TACTICAL_TODO TASK_1
-// LOG_REF: 2026-04-22
-// Description: Settings app — brightness, sleep toggle, key tester, T9 editor launcher, SD card info.
+// TRUTH_LINK: TRUTH_PROJECT.md § Workflow And Scope Boundary
+// LOG_REF: 2026-06-11 15:55:00
 
 #include "settings.h"
 #include "t9_editor.h"
@@ -121,11 +120,18 @@ static bool createBlankLuaAppOnSd(String& createdPath, String& error) {
         return false;
     }
 
+    if (!sdFat.exists("/apps")) {
+        if (!sdFat.mkdir("/apps")) {
+            error = "Failed to create /apps directory";
+            return false;
+        }
+    }
+
     String templateText = buildLuaBlankAppTemplateText();
     for (int index = 0; index < 1000; index++) {
         String candidate = (index == 0)
-            ? String("/blank_app.lua")
-            : String("/blank_app_") + String(index) + String(".lua");
+            ? String("/apps/blank_app.lua")
+            : String("/apps/blank_app_") + String(index) + String(".lua");
 
         FsFile existing;
         if (existing.open(candidate.c_str(), O_RDONLY)) {

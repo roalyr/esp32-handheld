@@ -1,14 +1,11 @@
-## CURRENT GOAL: Crash Popup ESC Closing, Wrench Icon, and Version 1.5 Bump
-- TARGET_SCOPE: Adjust the crash report popup to close on `Esc` rather than `Backspace` to maintain global consistency. Replace the Settings gear icon with a wrench icon. Bump the firmware version from `1.4` to `1.5`.
-- TARGET_FILES:
-  - `src/config.h` — Bump `FIRMWARE_VERSION` to `"1.5"`.
-  - `src/lua_scripts.cpp` — Modify `SETTINGS_ICON` to draw a wrench, change crash popup footer text to `"UP/DN scroll ESC close"`, and update `handle_crash_popup_input` to check for `input.KEY_ESC` instead of `input.KEY_BKSP`.
-- TRUTH_RELIANCE: TRUTH_PROJECT.md § Workflow And Scope Boundary (Emulation vs Hardware)
-- TECHNICAL_CONSTRAINTS:
-  - Keep the codebase modular and aligned with MODEL-CASCADE-PROTOCOL.md constraints.
+## CURRENT GOAL: Add ESP32-S2 & ESP32-S3 Build & Flash Scripts (Completed)
+- TARGET_SCOPE: Create scripts/build_s2.sh, scripts/build_s3.sh, and scripts/flash_s3.sh.
+- TARGET_FILES: scripts/build_s2.sh, scripts/build_s3.sh, scripts/flash_s3.sh, TRUTH_FLASHING.md
+- TRUTH_RELIANCE: TRUTH_FLASHING.md
+- TECHNICAL_CONSTRAINTS: N/A
 - ATOMIC_TASKS:
-  - [ ] TASK_1: Bump `FIRMWARE_VERSION` in `src/config.h` to `"1.5"`.
-  - [ ] TASK_2: In `src/lua_scripts.cpp`, update `SETTINGS_ICON` to draw a wrench instead of a gear.
-  - [ ] TASK_3: In `src/lua_scripts.cpp`, update `draw_crash_popup` footer text to reference `ESC` instead of `BKSP`.
-  - [ ] TASK_4: In `src/lua_scripts.cpp`, update `host:handle_crash_popup_input` to dismiss on `input.KEY_ESC` instead of `input.KEY_BKSP`.
-  - [ ] VERIFICATION: Compile the emulator target. Verify the settings icon is a wrench. Run a diagnostic test or ensure that the version output from `sys.version()` returns `"1.5"`.
+  - [x] TASK_1: Create build_s2.sh script to compile lolin_s2_mini target.
+  - [x] TASK_2: Create build_s3.sh script to compile esp32-s3-n16r8_diag target.
+  - [x] TASK_3: Create flash_s3.sh script using PlatformIO upload target (no-DFU serial upload).
+  - [x] VERIFICATION: Test compiled environment builds successfully via scripts.
+
